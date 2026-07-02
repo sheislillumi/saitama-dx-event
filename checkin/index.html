@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QRコード受付 | 県内企業DX推進統合イベント</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="back-link" href="../index.html">← イベントHPに戻る</a>
+  </header>
+
+  <main class="page-container">
+    <h1 class="page-title">QRコード受付</h1>
+    <p class="page-lead">
+      来場者の確認メールに記載されたQRコードを読み取り、受付(チェックイン)を行います。
+      カメラが使えない場合は、下部の手動入力欄をご利用ください。
+    </p>
+
+    <div class="form-card">
+      <div class="form-group">
+        <label class="form-label" for="location">受付場所</label>
+        <select id="location" class="select-lg">
+          <option value="展示ゾーン">展示ゾーン</option>
+          <option value="講演会場">講演会場</option>
+        </select>
+      </div>
+
+      <div id="checkinResult" class="checkin-result checkin-result--idle" role="status" aria-live="polite">
+        QRコードを読み取ると、ここに受付結果が表示されます。
+      </div>
+
+      <h2 class="checkin-section-title">カメラでQRコードを読み取る</h2>
+      <button type="button" id="cameraToggleBtn" class="btn btn-block btn-lg">カメラを起動</button>
+      <p class="camera-status" id="cameraStatus" hidden></p>
+      <div class="qr-reader-box" id="qr-reader" hidden></div>
+
+      <div class="manual-entry-box">
+        <h2 class="checkin-section-title">手動で受付する</h2>
+        <p class="form-hint">
+          カメラが使えない場合や読み取りがうまくいかない場合は、QRコードのQRトークン、
+          または来場者IDを直接入力して受付できます。
+        </p>
+        <form id="manualForm" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="manualToken">QRトークン / 来場者ID</label>
+            <input type="text" id="manualToken" name="manualToken" autocomplete="off" placeholder="例: a1b2c3d4e5f64789..." />
+          </div>
+          <button type="submit" class="btn btn-block btn-lg" id="manualSubmitBtn">この内容で受付する</button>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="../assets/js/common.js"></script>
+  <script src="../assets/js/api-client.js"></script>
+  <script src="../assets/js/qr-scanner.js"></script>
+  <script>
+    (function () {
+      const locationSelect = document.getElementById('location');
+      const resultBox = document.getElementById('checkinResult');
+
+      const cameraToggleBtn = document.getElementById('cameraToggleBtn');
+      const cameraStatus = document.getElementById('cameraStatus');
+      const qrReaderBox = document.getElementById('qr-reader');
+
+      const manualForm = document.getElementById('manualForm');
+      const manualTokenInput = document.getElementById('manualToken');
+      const manualSubmitBtn = document.getElementById('manualSubmitBtn');
+
+      let isProcessing = false;
+      let lastToken = null;
+      let lastScanAt = 0;
+
+      function showResult(type, mainText, subText) {
+        resultBox.className = 'checkin-result checkin-result--' + type;
+        resultBox.innerHTML = '';
+        resultBox.appendChild(document.createTextNode(mainText));
+        if (subText) {
+          const sub = document.createElement('span');
+          sub.className = 'checkin-result-sub';
+          sub.textContent = subText;
+          resultBox.appendChild(sub);
+        }
+        resultBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      function focusManualEntry() {
+        manualTokenInput.focus();
+      }
+
+      /**
+       * トークン(またはID)を GAS API(action=checkin)に送信し、結果を画面に表示する。
+       * カメラでの読み取り・手動入力の両方から呼び出される共通処理。
+       */
+      async function processCheckin(token) {
+        const trimmed = (token || '').trim();
+        if (trimmed === '') {
+          showResult('error', 'QRトークンまたは来場者IDを入力してください。');
+          return;
+        }
+
+        showResult('idle', '受付処理中です...');
+
+        try {
+          const result = await callGasApi('checkin', {
+            qrToken: trimmed,
+            location: locationSelect.value
+          });
+
+          if (result && result.success && result.alreadyCheckedIn) {
+            showResult(
+              'duplicate',
+              (result.name ? result.name + ' 様は' : 'こちらのQRコードは') + ' 受付済みです',
+              'チェックイン日時: ' + (result.checkinTime || '不明') + (result.location ? ' / 受付場所: ' + result.location : '')
+            );
+          } else if (result && result.success) {
+            showResult(
+              'success',
+              (result.name || '') + ' 様 受付完了',
+              '受付場所: ' + (result.location || locationSelect.value) + ' / ' + (result.checkinTime || '')
+            );
+            manualForm.reset();
+          } else if (result && result.error === 'not_found') {
+            showResult(
+              'error',
+              '未登録のQRコードです',
+              '下の「手動で受付する」欄にQRトークンや来場者IDを入力してご確認ください。'
+            );
+            focusManualEntry();
+          } else {
+            showResult('error', '受付処理に失敗しました', (result && result.message) || '時間をおいて再度お試しください。');
+          }
+        } catch (err) {
+          showResult('error', '通信エラーが発生しました', 'ネットワーク環境をご確認のうえ、再度お試しください。');
+        }
+      }
+
+      async function handleDecoded(token) {
+        const now = Date.now();
+        if (isProcessing) return;
+        // 同じQRコードがカメラに写り続けている間、連続で何度も送信しないようにする。
+        if (token === lastToken && now - lastScanAt < 4000) return;
+
+        lastToken = token;
+        lastScanAt = now;
+        isProcessing = true;
+        await processCheckin(token);
+        isProcessing = false;
+      }
+
+      cameraToggleBtn.addEventListener('click', async function () {
+        if (QrScanner.isScanning()) {
+          await QrScanner.stop();
+          qrReaderBox.hidden = true;
+          cameraStatus.hidden = true;
+          cameraToggleBtn.textContent = 'カメラを起動';
+          return;
+        }
+
+        if (!QrScanner.isSupported()) {
+          cameraStatus.hidden = false;
+          cameraStatus.textContent = 'このブラウザ・端末ではカメラを利用できません。下の手動入力欄をご利用ください。';
+          return;
+        }
+
+        cameraToggleBtn.disabled = true;
+        qrReaderBox.hidden = false;
+        cameraStatus.hidden = false;
+        cameraStatus.textContent = 'カメラを起動しています...';
+
+        try {
+          await QrScanner.start('qr-reader', handleDecoded);
+          cameraToggleBtn.textContent = 'カメラを停止';
+          cameraStatus.textContent = '枠内にQRコードを写してください。';
+        } catch (err) {
+          qrReaderBox.hidden = true;
+          cameraStatus.textContent =
+            'カメラを起動できませんでした。カメラへのアクセス許可をご確認いただくか、下の手動入力欄をご利用ください。';
+        } finally {
+          cameraToggleBtn.disabled = false;
+        }
+      });
+
+      manualForm.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        CommonUtils.setLoading(manualSubmitBtn, true, '受付処理中...', 'この内容で受付する');
+        await processCheckin(manualTokenInput.value);
+        CommonUtils.setLoading(manualSubmitBtn, false, '受付処理中...', 'この内容で受付する');
+      });
+
+      window.addEventListener('beforeunload', function () {
+        if (QrScanner.isScanning()) {
+          QrScanner.stop();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

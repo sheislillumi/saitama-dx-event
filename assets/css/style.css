@@ -1,0 +1,468 @@
+/*
+ * 県内企業DX推進統合イベント運営システム - 共通スタイルシート
+ * 全ページ共通のデザイン(ヘッダー・フォーム・ボタン・メッセージ表示等)をまとめる。
+ * スマホ〜PCまで崩れないよう、レスポンシブ(可変幅・メディアクエリ)で組んでいる。
+ */
+
+:root {
+  --color-primary: #0b5ed7;
+  --color-primary-dark: #084298;
+  --color-bg: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-text: #1f2933;
+  --color-text-muted: #5c6b7a;
+  --color-border: #d8dee5;
+  --color-success-bg: #e6f6ec;
+  --color-success-text: #1e7e34;
+  --color-success-border: #b7e4c7;
+  --color-error-bg: #fdecea;
+  --color-error-text: #c0392b;
+  --color-error-border: #f5c6cb;
+  --color-consent-bg: #fffaf0;
+  --color-consent-border: #ffe0a3;
+  --radius: 10px;
+  --max-width: 760px;
+  --font-base: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic",
+    "Segoe UI", Meiryo, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-base);
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.7;
+  font-size: 16px;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+/* ------------------------------------------------------------------ */
+/* ヘッダー・共通レイアウト                                             */
+/* ------------------------------------------------------------------ */
+
+.site-header {
+  background: var(--color-primary);
+  color: #fff;
+  padding: 0.9rem 1.25rem;
+}
+
+.site-header .back-link {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.site-header .back-link:hover {
+  text-decoration: underline;
+}
+
+.page-container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 1.75rem 1rem 4rem;
+}
+
+.page-title {
+  font-size: 1.6rem;
+  margin: 0 0 0.5rem;
+}
+
+.page-lead {
+  color: var(--color-text-muted);
+  margin: 0 0 1.75rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* フォームカード                                                      */
+/* ------------------------------------------------------------------ */
+
+.form-card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  padding: 1.75rem;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.08);
+}
+
+.form-section-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid var(--color-border);
+}
+
+.form-group {
+  margin-bottom: 1.4rem;
+}
+
+.form-label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 0.45rem;
+}
+
+.required-badge,
+.optional-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  margin-left: 0.45rem;
+  vertical-align: middle;
+}
+
+.required-badge {
+  color: #fff;
+  background: #e0432b;
+}
+
+.optional-badge {
+  color: var(--color-text-muted);
+  background: #eef1f4;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="tel"],
+input[type="number"],
+select,
+textarea {
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 1rem;
+  font-family: inherit;
+  background: #fff;
+  color: inherit;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(11, 94, 215, 0.15);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 6rem;
+}
+
+.form-hint {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  margin: 0.35rem 0 0;
+}
+
+/* チェックボックス・ラジオボタン群 */
+
+.checkbox-group,
+.radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.5rem;
+}
+
+.checkbox-item,
+.radio-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.checkbox-item input,
+.radio-item input {
+  width: auto;
+  min-width: 1.1rem;
+  min-height: 1.1rem;
+}
+
+.checkbox-item label,
+.radio-item label {
+  font-weight: 400;
+}
+
+/* 同意事項ボックス(個人情報取り扱い) */
+
+.consent-box {
+  background: var(--color-consent-bg);
+  border: 1px solid var(--color-consent-border);
+  border-radius: 8px;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1.4rem;
+}
+
+.consent-box p {
+  margin: 0 0 0.75rem;
+  font-size: 0.92rem;
+}
+
+.consent-box .checkbox-item {
+  margin-top: 0.9rem;
+  font-weight: 700;
+}
+
+/* ボタン */
+
+.btn {
+  display: inline-block;
+  padding: 0.9rem 2.2rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  background: var(--color-primary);
+  color: #fff;
+  transition: background 0.15s ease, transform 0.1s ease;
+  text-align: center;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--color-primary-dark);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-block {
+  display: block;
+  width: 100%;
+}
+
+/* 送信結果メッセージ */
+
+.form-message {
+  padding: 0.95rem 1.1rem;
+  border-radius: 8px;
+  margin-bottom: 1.4rem;
+  font-weight: 700;
+}
+
+.form-message--success {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  border: 1px solid var(--color-success-border);
+}
+
+.form-message--error {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+  border: 1px solid var(--color-error-border);
+}
+
+/* 入力エラー表示 */
+
+.field-error {
+  color: var(--color-error-text);
+  font-size: 0.82rem;
+  margin: 0.35rem 0 0;
+  display: none;
+}
+
+.field-error.is-visible {
+  display: block;
+}
+
+.form-group.has-error input,
+.form-group.has-error select,
+.form-group.has-error textarea,
+.consent-box.has-error {
+  border-color: var(--color-error-text);
+}
+
+.consent-box.has-error {
+  border-width: 1px;
+  border-style: solid;
+}
+
+/* メールアドレスのドメイン打ち間違い警告(Mailcheck) */
+
+.field-warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: #8a5a00;
+  background: #fff6e0;
+  border: 1px solid #ffe0a3;
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  margin: 0.4rem 0 0;
+}
+
+.link-button {
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  font-weight: 700;
+  font-size: 0.82rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
+.link-button:hover {
+  color: var(--color-primary-dark);
+}
+
+/* ------------------------------------------------------------------ */
+/* QRコード受付画面(checkin/index.html)                                */
+/* タブレット・スマホでの操作を想定し、ボタン・文字を大きめにしている。      */
+/* ------------------------------------------------------------------ */
+
+.select-lg {
+  font-size: 1.1rem;
+  padding: 0.8rem 0.9rem;
+}
+
+.btn-lg {
+  font-size: 1.25rem;
+  padding: 1.1rem 1.5rem;
+}
+
+.checkin-section-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 1.75rem 0 0.9rem;
+}
+
+.checkin-result {
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  transition: background 0.15s ease;
+}
+
+.checkin-result--idle {
+  background: #eef1f4;
+  color: var(--color-text-muted);
+  font-size: 1.05rem;
+  font-weight: 400;
+}
+
+.checkin-result--success {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  border: 2px solid var(--color-success-border);
+}
+
+.checkin-result--duplicate {
+  background: #fff6e0;
+  color: #8a5a00;
+  border: 2px solid #ffe0a3;
+}
+
+.checkin-result--error {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+  border: 2px solid var(--color-error-border);
+}
+
+.checkin-result-sub {
+  display: block;
+  font-size: 1rem;
+  font-weight: 400;
+  margin-top: 0.5rem;
+}
+
+.qr-reader-box {
+  width: 100%;
+  max-width: 420px;
+  margin: 0.75rem auto 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #000;
+}
+
+.qr-reader-box video,
+.qr-reader-box canvas {
+  width: 100% !important;
+}
+
+.camera-status {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  margin: 0.6rem 0 0;
+}
+
+.manual-entry-box {
+  border-top: 2px dashed var(--color-border);
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* レスポンシブ対応                                                     */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 600px) {
+  .page-container {
+    padding: 1.25rem 0.85rem 3rem;
+  }
+
+  .form-card {
+    padding: 1.25rem 1rem;
+  }
+
+  .page-title {
+    font-size: 1.35rem;
+  }
+
+  .btn {
+    width: 100%;
+    padding: 0.95rem 1rem;
+  }
+
+  .checkbox-group,
+  .radio-group {
+    gap: 0.6rem 1rem;
+  }
+
+  .checkin-result {
+    font-size: 1.15rem;
+    padding: 1.1rem;
+  }
+
+  .btn-lg {
+    font-size: 1.1rem;
+    padding: 1rem 1.1rem;
+  }
+}
+
+@media (min-width: 601px) {
+  .form-row {
+    display: flex;
+    gap: 1.25rem;
+  }
+
+  .form-row .form-group {
+    flex: 1;
+  }
+}

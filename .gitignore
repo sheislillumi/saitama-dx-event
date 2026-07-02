@@ -1,0 +1,32 @@
+# OS が自動生成するファイル
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+ehthumbs_vista.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# エディタ・IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 環境変数・秘密情報(APIキー等を誤ってコミットしないため)
+.env
+.env.*
+!.env.example
+
+# ログ
+*.log
+npm-debug.log*
+
+# 依存関係・ビルド成果物
+# (現状フロントはビルド不要だが、動作確認スクリプト等を追加した場合に備えて)
+node_modules/
+dist/
