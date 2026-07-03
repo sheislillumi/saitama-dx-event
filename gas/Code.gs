@@ -124,8 +124,8 @@ var QR_CODE_API_URL = 'https://api.qrserver.com/v1/create-qr-code/';
 // 確認メールに記載するイベント基本情報
 var EVENT_INFO = {
   NAME: '県内企業DX推進統合イベント',
-  DATE_TEXT: '2027年1月20日(水)',
-  VENUE: 'ソニックシティ'
+  DATE_TEXT: '令和9年(2027年)1月20日(水) 10:00〜17:00',
+  VENUE: 'ソニックシティ B1F 第2〜5展示場'
 };
 
 

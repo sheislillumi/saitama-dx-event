@@ -7,15 +7,15 @@
 
 ```
 saitama-dx-event/
-├── index.html                  # イベント公式HP (フェーズ3・未実装)
+├── index.html                  # イベント公式HP
 ├── exhibitor/
-│   └── index.html               # 出展申込フォーム (実装済み)
+│   └── index.html               # 出展申込フォーム
 ├── visitor/
-│   └── index.html               # 来場者申込フォーム (実装済み)
+│   └── index.html               # 来場者申込フォーム
 ├── checkin/
-│   └── index.html               # QRコード受付画面 (実装済み)
+│   └── index.html               # QRコード受付画面(当日運営者用)
 ├── admin/
-│   └── index.html               # 管理ダッシュボード (フェーズ6・未実装)
+│   └── index.html               # 管理ダッシュボード(要パスワード)
 ├── assets/
 │   ├── css/style.css            # 全画面共通スタイル
 │   └── js/
@@ -24,14 +24,24 @@ saitama-dx-event/
 │       └── qr-scanner.js        # html5-qrcodeのラッパー(checkin画面用)
 ├── gas/
 │   └── Code.gs                  # GAS側のコード(Apps Scriptエディタにも反映する)
+├── robots.txt                   # /admin/ を検索エンジンのクロール対象外に指定
 ├── .gitignore
-└── README.md
+├── README.md
+└── TESTING.md                   # 通しテスト・異常系テストの手順書
 ```
 
-現時点では、バックエンド(`gas/Code.gs`、QRコード生成・確認メール送信含む)、
-出展申込フォーム(`exhibitor/`)、来場者申込フォーム(`visitor/`)、
-QRコード受付画面(`checkin/`)を実装済みです。イベントHP(`index.html`)と
-管理ダッシュボード(`admin/`)はプレースホルダーのままです(今後のフェーズで対応)。
+指示書「3. ディレクトリ構成」に記載の5画面(イベントHP・出展申込フォーム・来場者申込フォーム・
+QRコード受付画面・管理ダッシュボード)およびバックエンド(GAS、QRコード生成・確認メール送信含む)を
+実装済みです。一連の流れを通しでテストする手順は [TESTING.md](TESTING.md) を参照してください。
+
+## 目次
+
+1. [バックエンド(GAS)のデプロイ手順](#バックエンドgasのデプロイ手順) — スプレッドシート作成〜Webアプリ公開まで
+2. [動作確認方法(GASエディタ上でのテスト)](#動作確認方法gasエディタ上でのテスト)
+3. [API仕様概要](#api仕様概要gascodegs)
+4. [CORSに関する注意](#corsに関する注意)
+5. [GitHub Pagesでの公開手順](#github-pagesでの公開手順) — フロントエンド(静的ファイル)の公開
+6. [TESTING.md](TESTING.md) — 5画面を通した手動テスト手順・異常系テスト項目
 
 ## バックエンド(GAS)のデプロイ手順
 
@@ -57,6 +67,8 @@ QRコード受付画面(`checkin/`)を実装済みです。イベントHP(`index
      メールアドレス / 電話番号 / 業種 / 関心カテゴリ / 同伴者数 / チェックイン状態 /
      チェックイン日時 / 受付場所
    - **Survey**(アンケート・任意): ID / 来場者ID / 満足度 / 自由記述
+   - **ErrorLog**(QRコード生成・確認メール送信のエラー記録用): 日時 / 種別 / 来場者ID /
+     QRトークン / メールアドレス / エラー内容
 
    ※ シート名・列見出し・列順は `gas/Code.gs` 内のコメント、および
      指示書「4. データスキーマ」と完全に一致させること。
@@ -68,7 +80,7 @@ QRコード受付画面(`checkin/`)を実装済みです。イベントHP(`index
 
    | プロパティ名 | 値 | 備考 |
    |---|---|---|
-   | `ADMIN_API_KEY` | 推測されにくいランダムな文字列 | `getVisitors`/`getExhibitors`/`getStats` 呼び出し時に必須 |
+   | `ADMIN_API_KEY` | 推測されにくいランダムな文字列 | `getVisitors`/`getExhibitors`/`getStats` 呼び出し時に必須。**この値がそのまま管理ダッシュボード(`admin/index.html`)ログイン時のパスワードになる。** |
    | `SPREADSHEET_ID` | (スタンドアロンScriptプロジェクトの場合のみ) | Apps Scriptをスプレッドシートに紐づけて作成した場合(手順1〜2の方法)は不要 |
 
 ### 5. Webアプリとしてデプロイする
@@ -81,7 +93,8 @@ QRコード受付画面(`checkin/`)を実装済みです。イベントHP(`index
    - アクセスできるユーザー: **全員(Anyone)**
      - 個人情報を扱うシステムのため、本番運用前にアクセス制御方針を再確認すること。
 4. [デプロイ] をクリックし、表示された **ウェブアプリのURL** をコピーする。
-5. このURLを、フェーズ2で `assets/js/api-client.js` の `GAS_API_URL` に設定する。
+5. このURLを `assets/js/api-client.js` の `GAS_API_CONFIG.BASE_URL` に設定する
+   (この1箇所を差し替えるだけで、全画面のAPI接続先が切り替わる)。
 
 **コードを更新した場合の注意点**: `Code.gs` を修正しただけではデプロイ済みURLには反映されません。
 [デプロイ] > [デプロイを管理] から既存のウェブアプリデプロイを選び、鉛筆アイコンで編集して
@@ -135,7 +148,7 @@ curl -X POST "https://script.google.com/macros/s/xxxxxxxxxxxx/exec" `
 | action | 必須パラメータ | 概要 |
 |---|---|---|
 | `registerExhibitor` | companyName, contactName, email, phone, category | 出展申込をExhibitorsシートに追加 |
-| `registerVisitor` | name, companyName, email, phone, agreement(true) | UUID・QRトークンを発行しVisitorsシートに追加。メール送信・QR画像生成は現時点ではダミー(ログ出力のみ、フェーズ4で実装) |
+| `registerVisitor` | name, companyName, email, phone, agreement(true) | UUID・QRトークンを発行しVisitorsシートに追加。続けてQRコード画像を生成(api.qrserver.com)し、GmailAppで確認メール(QRコードをインライン画像として埋め込み)を送信する。QRコード生成・メール送信に失敗しても来場者登録自体は失敗させず、ErrorLogシートにエラーを記録する |
 | `checkin` | qrToken | 該当来場者のチェックイン状態を更新。重複時は「受付済みです」を返す |
 
 ### doGet(e) — action で分岐(すべて `apiKey` 必須)
@@ -149,17 +162,14 @@ curl -X POST "https://script.google.com/macros/s/xxxxxxxxxxxx/exec" `
 `apiKey` はスクリプトプロパティ `ADMIN_API_KEY` の値と一致しないと `401相当`
 (`{"success":false,"error":"unauthorized"}`)が返ります。
 
-## CORSに関する注意(フェーズ2以降のフロント実装時に参照)
+## CORSに関する注意
 
 GAS Web AppはブラウザからのCORSプリフライト(OPTIONSリクエスト)に対応していません。
 そのため、`fetch` でJSONをPOSTする際は `Content-Type: application/json` を使わず、
 **`Content-Type: text/plain` でJSON文字列をそのままbodyに入れて送信**してください。
 `gas/Code.gs` の `doPost` はこの形式のbody(`e.postData.contents`)をJSONとしてパースします。
-
-## 今後のフェーズ
-
-以降のイベントHP・管理ダッシュボードの実装は、
-`DX展示会システム_ClaudeCode指示書.md` の「8. Claude Codeへの依頼」記載のフェーズ3・6で対応します。
+(`assets/js/api-client.js` の `callGasApi`/`callGasApiGet` はこの対応込みで実装済みのため、
+フロント側で個別に意識する必要はない)
 
 ## GitHub Pagesでの公開手順
 
