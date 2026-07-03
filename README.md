@@ -147,7 +147,7 @@ curl -X POST "https://script.google.com/macros/s/xxxxxxxxxxxx/exec" `
 
 | action | 必須パラメータ | 概要 |
 |---|---|---|
-| `registerExhibitor` | companyName, contactName, email, phone, category | 出展申込をExhibitorsシートに追加 |
+| `registerExhibitor` | companyName, contactName, email, phone, category | 出展申込をExhibitorsシートに追加。続けてGmailAppで「申請受付」の確認メール(QRコードなし。選定は委託者が行う旨を明記)を送信する。送信に失敗しても出展申込登録自体は失敗させず、ErrorLogシートにエラーを記録する |
 | `registerVisitor` | name, companyName, email, phone, agreement(true) | UUID・QRトークンを発行しVisitorsシートに追加。続けてQRコード画像を生成(api.qrserver.com)し、GmailAppで確認メール(QRコードをインライン画像として埋め込み)を送信する。QRコード生成・メール送信に失敗しても来場者登録自体は失敗させず、ErrorLogシートにエラーを記録する |
 | `checkin` | qrToken | 該当来場者のチェックイン状態を更新。重複時は「受付済みです」を返す |
 

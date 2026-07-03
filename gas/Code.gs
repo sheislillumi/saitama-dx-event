@@ -230,13 +230,91 @@ function registerExhibitor_(params) {
     };
     appendRecord_(sheet, EXHIBITOR_HEADERS, record);
 
-    // TODO(フェーズ2以降): 「申請を受け付けました」自動返信メールを実装する。
-    Logger.log('[DUMMY] 出展申込の自動返信メールを送信する想定: ' + params.email);
+    // 出展申請受付の確認メール送信。失敗しても出展申込登録自体は失敗させない
+    // (sendExhibitorConfirmationEmail_ 内部で例外を握りつぶし ErrorLog シートに記録する
+    // 設計だが、念のためここでも try/catch する。sendVisitorConfirmationEmail_ と同じ方針)。
+    try {
+      sendExhibitorConfirmationEmail_(id, params.contactName, params.email, params.companyName, params.category);
+    } catch (err) {
+      logError_('出展申請確認メール送信', id, '', params.email, err && err.message ? err.message : String(err));
+    }
 
     return successResult_({ id: id });
   } finally {
     lock.releaseLock();
   }
+}
+
+
+// ==========================================================================
+// 出展申込確認メール送信(registerExhibitor_ から呼び出される)
+// ==========================================================================
+
+/**
+ * 出展者へ「申請受付」の確認メールを送信する。
+ * 来場者向け(sendVisitorConfirmationEmail_)と同じ設計方針を踏襲するが、出展者は
+ * まだ選定前のためQRコードは付与しない。送信に失敗しても例外を投げず、ErrorLogシートに
+ * 記録するのみに留める(呼び出し元の出展申込登録処理を失敗させないための設計)。
+ */
+function sendExhibitorConfirmationEmail_(exhibitorId, contactName, email, companyName, category) {
+  try {
+    var subject = '【' + EVENT_INFO.NAME + '】出展申請を受け付けました';
+    GmailApp.sendEmail(email, subject, buildExhibitorConfirmationEmailPlainText_(contactName, companyName, category), {
+      htmlBody: buildExhibitorConfirmationEmailHtml_(contactName, companyName, category),
+      name: EVENT_INFO.NAME + ' 事務局'
+    });
+  } catch (err) {
+    // ErrorLogシートの「来場者ID」列は、出展者IDの記録にも流用している(出展者専用の列は
+    // 用意していないため。QRトークン列は該当がないため空文字とする)。
+    logError_('出展申請確認メール送信', exhibitorId, '', email, err && err.message ? err.message : String(err));
+  }
+}
+
+/**
+ * 出展申請確認メールのHTML本文を組み立てる。
+ * 「申請受付」であり選定確定ではないことを明記し、選定は委託者が行う旨を記載する。
+ */
+function buildExhibitorConfirmationEmailHtml_(contactName, companyName, category) {
+  return (
+    '<div style="font-family: sans-serif; line-height: 1.7; color: #1f2933;">' +
+    '<p>' + escapeHtml_(companyName) + ' ' + escapeHtml_(contactName) + ' 様</p>' +
+    '<p>' + EVENT_INFO.NAME + ' への出展申請をいただき、誠にありがとうございます。<br />' +
+    '以下の内容で申請を受け付けました。</p>' +
+    '<table style="border-collapse: collapse; margin: 1em 0;">' +
+    '<tr><td style="padding: 4px 12px 4px 0; color: #5c6b7a;">会社名</td><td>' + escapeHtml_(companyName) + '</td></tr>' +
+    '<tr><td style="padding: 4px 12px 4px 0; color: #5c6b7a;">担当者名</td><td>' + escapeHtml_(contactName) + '</td></tr>' +
+    '<tr><td style="padding: 4px 12px 4px 0; color: #5c6b7a;">希望カテゴリ</td><td>' + escapeHtml_(category) + '</td></tr>' +
+    '<tr><td style="padding: 4px 12px 4px 0; color: #5c6b7a;">開催日時</td><td>' + EVENT_INFO.DATE_TEXT + '</td></tr>' +
+    '<tr><td style="padding: 4px 12px 4px 0; color: #5c6b7a;">会場</td><td>' + EVENT_INFO.VENUE + '</td></tr>' +
+    '</table>' +
+    '<p><strong>本メールは出展申請の受付のご連絡であり、出展の可否が確定したものではありません。</strong><br />' +
+    '出展者の選定は委託者(公益財団法人埼玉県産業振興公社)が行い、選定結果は後日改めてご連絡いたします。' +
+    'あらかじめご了承ください。</p>' +
+    '<p>ご不明な点がございましたら、本メールへ返信のうえお問い合わせください。</p>' +
+    '</div>'
+  );
+}
+
+/** 出展申請確認メールのプレーンテキスト本文(HTMLメール非対応の環境向け)を組み立てる。 */
+function buildExhibitorConfirmationEmailPlainText_(contactName, companyName, category) {
+  return [
+    companyName + ' ' + contactName + ' 様',
+    '',
+    EVENT_INFO.NAME + ' への出展申請を受け付けました。',
+    '',
+    '■ お申し込み内容',
+    '会社名: ' + companyName,
+    '担当者名: ' + contactName,
+    '希望カテゴリ: ' + category,
+    '',
+    '■ 開催概要',
+    '開催日時: ' + EVENT_INFO.DATE_TEXT,
+    '会場: ' + EVENT_INFO.VENUE,
+    '',
+    '本メールは出展申請の受付のご連絡であり、出展の可否が確定したものではありません。',
+    '出展者の選定は委託者(公益財団法人埼玉県産業振興公社)が行い、',
+    '選定結果は後日改めてご連絡いたします。あらかじめご了承ください。'
+  ].join('\n');
 }
 
 
@@ -871,11 +949,20 @@ function parseParams_(e) {
 // テスト用関数(Apps Scriptエディタから直接実行して動作確認する)
 // ==========================================================================
 
-function test_registerExhibitor() {
+/**
+ * 出展申込登録のテスト。
+ * 実際に確認メール送信まで確認したい場合は、Apps Scriptエディタで
+ * 引数に自分が受信できるメールアドレスを渡して実行する(例:
+ * test_registerExhibitor('your-address@gmail.com'))。
+ * 引数を省略した場合はダミーのメールアドレス(実在しない)で登録される。
+ *
+ * @param {string} [testEmail] 確認メールを実際に受信して確認したい場合の宛先アドレス
+ */
+function test_registerExhibitor(testEmail) {
   var result = registerExhibitor_({
     companyName: 'テスト株式会社',
     contactName: '埼玉太郎',
-    email: 'exhibitor-test@example.com',
+    email: testEmail || 'exhibitor-test@example.com',
     phone: '048-000-0000',
     category: '汎用ツール',
     description: 'クラウド勤怠管理システムのデモ展示',
