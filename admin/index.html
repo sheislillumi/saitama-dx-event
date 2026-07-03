@@ -7,11 +7,657 @@
   <link rel="stylesheet" href="../assets/css/style.css" />
 </head>
 <body>
-  <!-- TODO(フェーズ6): 指示書「5-5. 管理ダッシュボード」の内容を実装する -->
-  <h1>管理ダッシュボード</h1>
-  <p>このページはフェーズ6で実装予定です。</p>
+  <header class="site-header">
+    <a class="back-link" href="../index.html">← イベントHPに戻る</a>
+  </header>
+
+  <!-- ログイン画面 -->
+  <main class="page-container" id="loginView">
+    <h1 class="page-title">管理ダッシュボード</h1>
+    <p class="page-lead">
+      来場者一覧・出展者一覧の閲覧、集計の確認、CSV出力には管理者用パスワードが必要です。
+    </p>
+
+    <div class="login-card-wrapper">
+      <div id="loginMessage" class="form-message" role="alert" hidden></div>
+
+      <form id="loginForm" class="form-card" novalidate>
+        <div class="form-group">
+          <label class="form-label" for="apiKeyInput">管理者パスワード</label>
+          <input type="password" id="apiKeyInput" name="apiKey" autocomplete="off" required />
+          <p class="form-hint">GASのスクリプトプロパティ「ADMIN_API_KEY」に設定した値を入力してください。</p>
+        </div>
+        <button type="submit" class="btn btn-block" id="loginSubmitBtn">ログイン</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- ダッシュボード本体(ログイン後に表示) -->
+  <main class="admin-container" id="dashboardView" hidden>
+    <div class="admin-topbar">
+      <h1 class="page-title">管理ダッシュボード</h1>
+      <div class="admin-topbar-actions">
+        <button type="button" class="btn btn-outline btn-sm" id="refreshBtn">再読み込み</button>
+        <button type="button" class="btn btn-outline btn-sm" id="logoutBtn">ログアウト</button>
+      </div>
+    </div>
+
+    <div id="dashboardMessage" class="form-message" role="alert" hidden></div>
+
+    <section class="admin-section">
+      <div class="admin-section-header">
+        <h2 class="section-title-sm">集計</h2>
+      </div>
+      <div class="stat-grid" id="statGrid"></div>
+      <p class="stat-generated-at" id="statGeneratedAt"></p>
+    </section>
+
+    <section class="admin-section">
+      <div class="admin-section-header">
+        <h2 class="section-title-sm">来場者一覧</h2>
+        <button type="button" class="btn btn-sm" id="exportVisitorsBtn">来場者CSVを出力</button>
+      </div>
+
+      <div class="toolbar">
+        <input
+          type="text"
+          id="visitorSearch"
+          class="toolbar-search"
+          placeholder="氏名・会社名・メールアドレス・QRトークン等で検索"
+        />
+        <select id="visitorStatusFilter" class="toolbar-select">
+          <option value="all">チェックイン状態: すべて</option>
+          <option value="未">未チェックイン</option>
+          <option value="済">チェックイン済み</option>
+        </select>
+        <span class="toolbar-count" id="visitorCount"></span>
+        <p class="toolbar-hint">
+          見出しをクリックするとその項目でソートできます。CSV出力は検索・絞り込みに関わらず全件が対象です。
+        </p>
+      </div>
+
+      <div class="data-table-wrapper">
+        <table class="data-table" id="visitorsTable">
+          <thead>
+            <tr></tr>
+          </thead>
+          <tbody id="visitorsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="admin-section">
+      <div class="admin-section-header">
+        <h2 class="section-title-sm">出展者一覧</h2>
+        <button type="button" class="btn btn-sm" id="exportExhibitorsBtn">出展者CSVを出力</button>
+      </div>
+
+      <div class="toolbar">
+        <input
+          type="text"
+          id="exhibitorSearch"
+          class="toolbar-search"
+          placeholder="会社名・担当者名・メールアドレス等で検索"
+        />
+        <select id="exhibitorStatusFilter" class="toolbar-select">
+          <option value="all">ステータス: すべて</option>
+          <option value="申請中">申請中</option>
+          <option value="選定済">選定済</option>
+          <option value="不選定">不選定</option>
+        </select>
+        <span class="toolbar-count" id="exhibitorCount"></span>
+      </div>
+
+      <div class="data-table-wrapper">
+        <table class="data-table" id="exhibitorsTable">
+          <thead>
+            <tr></tr>
+          </thead>
+          <tbody id="exhibitorsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
 
   <script src="../assets/js/common.js"></script>
   <script src="../assets/js/api-client.js"></script>
+  <script>
+    (function () {
+      const SESSION_KEY = 'dxAdminApiKey';
+
+      const loginView = document.getElementById('loginView');
+      const dashboardView = document.getElementById('dashboardView');
+      const loginForm = document.getElementById('loginForm');
+      const apiKeyInput = document.getElementById('apiKeyInput');
+      const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+      const loginMessage = document.getElementById('loginMessage');
+      const dashboardMessage = document.getElementById('dashboardMessage');
+
+      const refreshBtn = document.getElementById('refreshBtn');
+      const logoutBtn = document.getElementById('logoutBtn');
+
+      const statGrid = document.getElementById('statGrid');
+      const statGeneratedAt = document.getElementById('statGeneratedAt');
+
+      const visitorSearchInput = document.getElementById('visitorSearch');
+      const visitorStatusFilterSelect = document.getElementById('visitorStatusFilter');
+      const visitorCountEl = document.getElementById('visitorCount');
+      const visitorsTable = document.getElementById('visitorsTable');
+      const visitorsTableBody = document.getElementById('visitorsTableBody');
+      const exportVisitorsBtn = document.getElementById('exportVisitorsBtn');
+
+      const exhibitorSearchInput = document.getElementById('exhibitorSearch');
+      const exhibitorStatusFilterSelect = document.getElementById('exhibitorStatusFilter');
+      const exhibitorCountEl = document.getElementById('exhibitorCount');
+      const exhibitorsTable = document.getElementById('exhibitorsTable');
+      const exhibitorsTableBody = document.getElementById('exhibitorsTableBody');
+      const exportExhibitorsBtn = document.getElementById('exportExhibitorsBtn');
+
+      const state = {
+        apiKey: null,
+        visitors: [],
+        exhibitors: [],
+        visitorSearch: '',
+        visitorStatusFilter: 'all',
+        visitorSort: { key: '申込日時', dir: 'desc' },
+        exhibitorSearch: '',
+        exhibitorStatusFilter: 'all',
+        exhibitorSort: { key: '申込日時', dir: 'desc' }
+      };
+
+      // ----------------------------------------------------------------
+      // 列定義(表示用)。CSV出力はgas/Code.gsのシート見出しと完全一致させる。
+      // ----------------------------------------------------------------
+
+      function renderCheckinStatusBadge(row) {
+        const span = document.createElement('span');
+        const isDone = row['チェックイン状態'] === '済';
+        span.className = 'status-badge ' + (isDone ? 'status-badge--approved' : 'status-badge--pending');
+        span.textContent = row['チェックイン状態'] || '未';
+        return span;
+      }
+
+      function renderExhibitorStatusBadge(row) {
+        const span = document.createElement('span');
+        const status = row['ステータス'] || '';
+        const cls =
+          status === '選定済' ? 'status-badge--approved' : status === '不選定' ? 'status-badge--rejected' : 'status-badge--pending';
+        span.className = 'status-badge ' + cls;
+        span.textContent = status || '未設定';
+        return span;
+      }
+
+      const VISITOR_COLUMNS = [
+        { key: '申込日時', label: '申込日時' },
+        { key: '氏名', label: '氏名' },
+        { key: '会社名', label: '会社名' },
+        { key: '部署役職', label: '部署役職' },
+        { key: 'メールアドレス', label: 'メールアドレス' },
+        { key: '電話番号', label: '電話番号' },
+        { key: '業種', label: '業種' },
+        { key: '関心カテゴリ', label: '関心カテゴリ' },
+        { key: '同伴者数', label: '同伴者数' },
+        { key: 'チェックイン状態', label: 'チェックイン状態', render: renderCheckinStatusBadge },
+        { key: 'チェックイン日時', label: 'チェックイン日時' },
+        { key: '受付場所', label: '受付場所' }
+      ];
+
+      const EXHIBITOR_COLUMNS = [
+        { key: '申込日時', label: '申込日時' },
+        { key: '会社名', label: '会社名' },
+        { key: '担当者名', label: '担当者名' },
+        { key: 'メールアドレス', label: 'メールアドレス' },
+        { key: '電話番号', label: '電話番号' },
+        { key: '希望カテゴリ', label: '希望カテゴリ' },
+        { key: '展示内容概要', label: '展示内容概要' },
+        { key: '電源要否', label: '電源要否' },
+        { key: '搬入出希望時間', label: '搬入出希望時間' },
+        { key: 'ステータス', label: 'ステータス', render: renderExhibitorStatusBadge },
+        { key: '備考', label: '備考' }
+      ];
+
+      // CSV出力はgas/Code.gsの見出し(EXHIBITOR_HEADERS/VISITOR_HEADERS)と完全一致させ、
+      // 既存の差分抽出運用とそのまま組み合わせられるようにする(末尾に出力日時列のみ追加)。
+      const VISITOR_CSV_HEADERS = [
+        'ID', 'QRトークン', '申込日時', '氏名', '会社名', '部署役職', 'メールアドレス',
+        '電話番号', '業種', '関心カテゴリ', '同伴者数', 'チェックイン状態',
+        'チェックイン日時', '受付場所'
+      ];
+      const EXHIBITOR_CSV_HEADERS = [
+        'ID', '申込日時', '会社名', '担当者名', 'メールアドレス', '電話番号',
+        '希望カテゴリ', '展示内容概要', '電源要否', '搬入出希望時間', 'ステータス', '備考'
+      ];
+
+      // ----------------------------------------------------------------
+      // ログイン処理
+      // ----------------------------------------------------------------
+
+      function showDashboard() {
+        loginView.hidden = true;
+        dashboardView.hidden = false;
+      }
+
+      function showLogin(message) {
+        dashboardView.hidden = true;
+        loginView.hidden = false;
+        sessionStorage.removeItem(SESSION_KEY);
+        state.apiKey = null;
+        if (message) {
+          CommonUtils.showMessage(loginMessage, 'error', message);
+        }
+      }
+
+      async function tryLogin(apiKey, options) {
+        const silent = options && options.silent;
+        if (!silent) {
+          CommonUtils.clearMessage(loginMessage);
+          CommonUtils.setLoading(loginSubmitBtn, true, 'ログイン中...', 'ログイン');
+        }
+
+        try {
+          const result = await callGasApiGet('getStats', { apiKey: apiKey });
+          if (result && result.success) {
+            state.apiKey = apiKey;
+            sessionStorage.setItem(SESSION_KEY, apiKey);
+            showDashboard();
+            await loadAllData();
+            return true;
+          }
+
+          if (!silent) {
+            CommonUtils.showMessage(
+              loginMessage,
+              'error',
+              (result && result.message) || 'パスワードが正しくありません。'
+            );
+          }
+          return false;
+        } catch (err) {
+          if (!silent) {
+            CommonUtils.showMessage(loginMessage, 'error', '通信エラーが発生しました。ネットワーク環境をご確認ください。');
+          }
+          return false;
+        } finally {
+          if (!silent) {
+            CommonUtils.setLoading(loginSubmitBtn, false, 'ログイン中...', 'ログイン');
+          }
+        }
+      }
+
+      loginForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        const apiKey = apiKeyInput.value.trim();
+        if (!apiKey) {
+          CommonUtils.showMessage(loginMessage, 'error', '管理者パスワードを入力してください。');
+          return;
+        }
+        tryLogin(apiKey);
+      });
+
+      logoutBtn.addEventListener('click', function () {
+        apiKeyInput.value = '';
+        showLogin();
+      });
+
+      // ----------------------------------------------------------------
+      // データ取得
+      // ----------------------------------------------------------------
+
+      async function loadAllData() {
+        CommonUtils.clearMessage(dashboardMessage);
+        CommonUtils.setLoading(refreshBtn, true, '読み込み中...', '再読み込み');
+
+        try {
+          const [statsResult, visitorsResult, exhibitorsResult] = await Promise.all([
+            callGasApiGet('getStats', { apiKey: state.apiKey }),
+            callGasApiGet('getVisitors', { apiKey: state.apiKey }),
+            callGasApiGet('getExhibitors', { apiKey: state.apiKey })
+          ]);
+
+          const results = [statsResult, visitorsResult, exhibitorsResult];
+          const unauthorized = results.some(function (r) { return r && r.error === 'unauthorized'; });
+          if (unauthorized) {
+            showLogin('認証の有効期限が切れました。もう一度パスワードを入力してください。');
+            return;
+          }
+
+          const failed = results.find(function (r) { return !r || !r.success; });
+          if (failed) {
+            CommonUtils.showMessage(dashboardMessage, 'error', failed.message || 'データの取得に失敗しました。');
+            return;
+          }
+
+          renderStats(statsResult);
+          state.visitors = visitorsResult.visitors || [];
+          state.exhibitors = exhibitorsResult.exhibitors || [];
+          renderVisitorsTable();
+          renderExhibitorsTable();
+        } catch (err) {
+          CommonUtils.showMessage(
+            dashboardMessage,
+            'error',
+            '通信エラーが発生しました。ネットワーク環境をご確認のうえ、再読み込みをお試しください。'
+          );
+        } finally {
+          CommonUtils.setLoading(refreshBtn, false, '読み込み中...', '再読み込み');
+        }
+      }
+
+      refreshBtn.addEventListener('click', function () {
+        loadAllData();
+      });
+
+      // ----------------------------------------------------------------
+      // 集計表示
+      // ----------------------------------------------------------------
+
+      function renderStats(statsResult) {
+        const stats = statsResult || {};
+        const visitors = stats.visitors || { total: 0, checkedIn: 0, checkinRate: 0 };
+        const exhibitors = stats.exhibitors || { total: 0, byStatus: {} };
+
+        statGrid.innerHTML = '';
+
+        const cards = [
+          { value: visitors.total, label: '来場者 申込者数' },
+          { value: visitors.checkedIn, label: 'チェックイン済み人数' },
+          { value: visitors.checkinRate + '%', label: 'チェックイン率' },
+          { value: exhibitors.total, label: '出展 申込者数' }
+        ];
+
+        cards.forEach(function (item) {
+          const card = document.createElement('div');
+          card.className = 'stat-card';
+
+          const value = document.createElement('div');
+          value.className = 'stat-card-value';
+          value.textContent = item.value;
+
+          const label = document.createElement('div');
+          label.className = 'stat-card-label';
+          label.textContent = item.label;
+
+          card.appendChild(value);
+          card.appendChild(label);
+          statGrid.appendChild(card);
+        });
+
+        const byStatus = exhibitors.byStatus || {};
+        const statusText = Object.keys(byStatus)
+          .map(function (key) { return key + ': ' + byStatus[key]; })
+          .join(' / ');
+
+        const statusCard = document.createElement('div');
+        statusCard.className = 'stat-card';
+
+        const statusValue = document.createElement('div');
+        statusValue.className = 'stat-card-value';
+        statusValue.style.fontSize = '1rem';
+        statusValue.textContent = statusText || '-';
+
+        const statusLabel = document.createElement('div');
+        statusLabel.className = 'stat-card-label';
+        statusLabel.textContent = '出展 ステータス内訳';
+
+        statusCard.appendChild(statusValue);
+        statusCard.appendChild(statusLabel);
+        statGrid.appendChild(statusCard);
+
+        statGeneratedAt.textContent = '集計日時: ' + (stats.generatedAt || '-');
+      }
+
+      // ----------------------------------------------------------------
+      // 検索・フィルタ・ソート共通処理
+      // ----------------------------------------------------------------
+
+      function matchesSearch(row, searchTerm) {
+        if (searchTerm === '') return true;
+        return Object.keys(row).some(function (key) {
+          return String(row[key] === undefined || row[key] === null ? '' : row[key])
+            .toLowerCase()
+            .includes(searchTerm);
+        });
+      }
+
+      function compareValues(a, b) {
+        const aNum = a === '' || a === null || a === undefined ? NaN : Number(a);
+        const bNum = b === '' || b === null || b === undefined ? NaN : Number(b);
+        if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) {
+          return aNum - bNum;
+        }
+        return String(a || '').localeCompare(String(b || ''), 'ja');
+      }
+
+      function sortRows(rows, sortState) {
+        const sorted = rows.slice().sort(function (rowA, rowB) {
+          const cmp = compareValues(rowA[sortState.key], rowB[sortState.key]);
+          return sortState.dir === 'asc' ? cmp : -cmp;
+        });
+        return sorted;
+      }
+
+      function renderTable(tableEl, tbodyEl, columns, rows) {
+        const theadRow = tableEl.querySelector('thead tr');
+        theadRow.innerHTML = '';
+
+        columns.forEach(function (col) {
+          const th = document.createElement('th');
+          th.appendChild(col.headerEl);
+          theadRow.appendChild(th);
+        });
+
+        tbodyEl.innerHTML = '';
+
+        if (rows.length === 0) {
+          const tr = document.createElement('tr');
+          tr.className = 'empty-row';
+          const td = document.createElement('td');
+          td.colSpan = columns.length;
+          td.textContent = '該当するデータがありません。';
+          tr.appendChild(td);
+          tbodyEl.appendChild(tr);
+          return;
+        }
+
+        rows.forEach(function (row) {
+          const tr = document.createElement('tr');
+          columns.forEach(function (col) {
+            const td = document.createElement('td');
+            if (col.render) {
+              td.appendChild(col.render(row));
+            } else {
+              const value = row[col.key];
+              td.textContent = value === undefined || value === null ? '' : String(value);
+            }
+            tr.appendChild(td);
+          });
+          tbodyEl.appendChild(tr);
+        });
+      }
+
+      function buildSortableHeader(col, sortState, onSortChange) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'sort-btn';
+        const arrow = sortState.key === col.key ? (sortState.dir === 'asc' ? ' ▲' : ' ▼') : '';
+        btn.textContent = col.label + arrow;
+        btn.addEventListener('click', function () {
+          onSortChange(col.key);
+        });
+        return btn;
+      }
+
+      // ----------------------------------------------------------------
+      // 来場者一覧
+      // ----------------------------------------------------------------
+
+      function getFilteredVisitors() {
+        const searchTerm = state.visitorSearch.trim().toLowerCase();
+        const statusFilter = state.visitorStatusFilter;
+
+        const rows = state.visitors.filter(function (row) {
+          if (statusFilter !== 'all' && row['チェックイン状態'] !== statusFilter) return false;
+          return matchesSearch(row, searchTerm);
+        });
+
+        return sortRows(rows, state.visitorSort);
+      }
+
+      function handleVisitorSortChange(key) {
+        if (state.visitorSort.key === key) {
+          state.visitorSort.dir = state.visitorSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.visitorSort = { key: key, dir: 'asc' };
+        }
+        renderVisitorsTable();
+      }
+
+      function renderVisitorsTable() {
+        const columns = VISITOR_COLUMNS.map(function (col) {
+          return Object.assign({}, col, {
+            headerEl: buildSortableHeader(col, state.visitorSort, handleVisitorSortChange)
+          });
+        });
+        const rows = getFilteredVisitors();
+        renderTable(visitorsTable, visitorsTableBody, columns, rows);
+        visitorCountEl.textContent = rows.length + ' 件 / 全 ' + state.visitors.length + ' 件';
+      }
+
+      visitorSearchInput.addEventListener('input', function () {
+        state.visitorSearch = visitorSearchInput.value;
+        renderVisitorsTable();
+      });
+
+      visitorStatusFilterSelect.addEventListener('change', function () {
+        state.visitorStatusFilter = visitorStatusFilterSelect.value;
+        renderVisitorsTable();
+      });
+
+      // ----------------------------------------------------------------
+      // 出展者一覧
+      // ----------------------------------------------------------------
+
+      function getFilteredExhibitors() {
+        const searchTerm = state.exhibitorSearch.trim().toLowerCase();
+        const statusFilter = state.exhibitorStatusFilter;
+
+        const rows = state.exhibitors.filter(function (row) {
+          if (statusFilter !== 'all' && row['ステータス'] !== statusFilter) return false;
+          return matchesSearch(row, searchTerm);
+        });
+
+        return sortRows(rows, state.exhibitorSort);
+      }
+
+      function handleExhibitorSortChange(key) {
+        if (state.exhibitorSort.key === key) {
+          state.exhibitorSort.dir = state.exhibitorSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.exhibitorSort = { key: key, dir: 'asc' };
+        }
+        renderExhibitorsTable();
+      }
+
+      function renderExhibitorsTable() {
+        const columns = EXHIBITOR_COLUMNS.map(function (col) {
+          return Object.assign({}, col, {
+            headerEl: buildSortableHeader(col, state.exhibitorSort, handleExhibitorSortChange)
+          });
+        });
+        const rows = getFilteredExhibitors();
+        renderTable(exhibitorsTable, exhibitorsTableBody, columns, rows);
+        exhibitorCountEl.textContent = rows.length + ' 件 / 全 ' + state.exhibitors.length + ' 件';
+      }
+
+      exhibitorSearchInput.addEventListener('input', function () {
+        state.exhibitorSearch = exhibitorSearchInput.value;
+        renderExhibitorsTable();
+      });
+
+      exhibitorStatusFilterSelect.addEventListener('change', function () {
+        state.exhibitorStatusFilter = exhibitorStatusFilterSelect.value;
+        renderExhibitorsTable();
+      });
+
+      // ----------------------------------------------------------------
+      // CSV出力(既存の差分抽出運用と組み合わせられるよう、シートと同じ列構成
+      // に「CSV出力日時」列を追加した形式で出力する。ファイル名にも出力日時を含める)
+      // ----------------------------------------------------------------
+
+      function toCsvValue(value) {
+        const str = value === undefined || value === null ? '' : String(value);
+        if (/[",\n\r]/.test(str)) {
+          return '"' + str.replace(/"/g, '""') + '"';
+        }
+        return str;
+      }
+
+      function buildCsv(headers, rows, timestamp) {
+        const allHeaders = headers.concat(['CSV出力日時']);
+        const lines = [allHeaders.map(toCsvValue).join(',')];
+        rows.forEach(function (row) {
+          const line = headers.map(function (h) { return toCsvValue(row[h]); });
+          line.push(toCsvValue(timestamp));
+          lines.push(line.join(','));
+        });
+        return lines.join('\r\n');
+      }
+
+      function downloadCsv(filename, csvContent) {
+        const bom = '﻿'; // Excelでの文字化けを防ぐためUTF-8 BOMを付与
+        const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+
+      /** サーバー側(gas/Code.gs の nowString_)と同じ書式・タイムゾーン(JST固定)で出力日時を作る。 */
+      function formatJstTimestamp(date) {
+        const jstMs = date.getTime() + date.getTimezoneOffset() * 60000 + 9 * 60 * 60000;
+        const jst = new Date(jstMs);
+        const pad = function (n) { return String(n).padStart(2, '0'); };
+        return (
+          jst.getFullYear() + '-' + pad(jst.getMonth() + 1) + '-' + pad(jst.getDate()) +
+          ' ' + pad(jst.getHours()) + ':' + pad(jst.getMinutes()) + ':' + pad(jst.getSeconds())
+        );
+      }
+
+      function formatTimestampForFilename(timestamp) {
+        return timestamp.replace(/[-:]/g, '').replace(' ', '_');
+      }
+
+      exportVisitorsBtn.addEventListener('click', function () {
+        const timestamp = formatJstTimestamp(new Date());
+        const csv = buildCsv(VISITOR_CSV_HEADERS, state.visitors, timestamp);
+        downloadCsv('visitors_' + formatTimestampForFilename(timestamp) + '.csv', csv);
+      });
+
+      exportExhibitorsBtn.addEventListener('click', function () {
+        const timestamp = formatJstTimestamp(new Date());
+        const csv = buildCsv(EXHIBITOR_CSV_HEADERS, state.exhibitors, timestamp);
+        downloadCsv('exhibitors_' + formatTimestampForFilename(timestamp) + '.csv', csv);
+      });
+
+      // ----------------------------------------------------------------
+      // 初期化: セッションに保存されたパスワードがあれば自動ログインを試みる
+      // ----------------------------------------------------------------
+
+      (function init() {
+        const savedApiKey = sessionStorage.getItem(SESSION_KEY);
+        if (savedApiKey) {
+          tryLogin(savedApiKey, { silent: true }).then(function (success) {
+            if (!success) {
+              showLogin();
+            }
+          });
+        }
+      })();
+    })();
+  </script>
 </body>
 </html>
