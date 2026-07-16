@@ -54,6 +54,25 @@
 
     <section class="admin-section">
       <div class="admin-section-header">
+        <h2 class="section-title-sm">気になった相手を記録する 集計</h2>
+      </div>
+      <div class="stat-grid" id="interactionStatGrid"></div>
+      <p class="stat-generated-at" id="interactionStatGeneratedAt"></p>
+
+      <h3 class="checkin-section-title">人気ブースランキング</h3>
+      <p class="form-hint">出展者ごとに、記録したユニーク来場者数が多い順に表示しています。</p>
+      <div class="data-table-wrapper">
+        <table class="data-table" id="exhibitorRankingTable">
+          <thead>
+            <tr><th>順位</th><th>会社名</th><th>記録数</th></tr>
+          </thead>
+          <tbody id="exhibitorRankingTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="admin-section">
+      <div class="admin-section-header">
         <h2 class="section-title-sm">来場者一覧</h2>
         <button type="button" class="btn btn-sm" id="exportVisitorsBtn">来場者CSVを出力</button>
       </div>
@@ -138,6 +157,10 @@
 
       const statGrid = document.getElementById('statGrid');
       const statGeneratedAt = document.getElementById('statGeneratedAt');
+
+      const interactionStatGrid = document.getElementById('interactionStatGrid');
+      const interactionStatGeneratedAt = document.getElementById('interactionStatGeneratedAt');
+      const exhibitorRankingTableBody = document.getElementById('exhibitorRankingTableBody');
 
       const visitorSearchInput = document.getElementById('visitorSearch');
       const visitorStatusFilterSelect = document.getElementById('visitorStatusFilter');
@@ -332,6 +355,10 @@
           state.exhibitors = exhibitorsResult.exhibitors || [];
           renderVisitorsTable();
           renderExhibitorsTable();
+
+          // getInteractionStats は本番のGASデプロイ状況によっては未対応(unknown_action)の
+          // 場合があるため、他の集計・一覧表示を巻き込まないよう独立して読み込む。
+          loadInteractionStats();
         } catch (err) {
           CommonUtils.showMessage(
             dashboardMessage,
@@ -404,6 +431,115 @@
         statGrid.appendChild(statusCard);
 
         statGeneratedAt.textContent = '集計日時: ' + (stats.generatedAt || '-');
+      }
+
+      // ----------------------------------------------------------------
+      // 「気になった相手を記録する」機能の集計表示
+      // ----------------------------------------------------------------
+
+      /**
+       * getInteractionStats を取得して描画する。他の集計・一覧表示(getStats/getVisitors/
+       * getExhibitors)とは独立して呼び出しており、失敗してもダッシュボード全体は
+       * 引き続き利用できる(GASの本番デプロイにこのactionがまだ反映されていない場合でも、
+       * 来場者・出展者一覧等の運営に不可欠な機能まで巻き添えで止めないための設計)。
+       */
+      async function loadInteractionStats() {
+        try {
+          const result = await callGasApiGet('getInteractionStats', { apiKey: state.apiKey });
+          if (result && result.success) {
+            renderInteractionStats(result);
+          } else {
+            renderInteractionStatsUnavailable(
+              result && result.error === 'unknown_action'
+                ? '集計を取得できませんでした(GAS側が未対応のバージョンの可能性があります)。'
+                : (result && result.message) || '集計の取得に失敗しました。'
+            );
+          }
+        } catch (err) {
+          renderInteractionStatsUnavailable('通信エラーが発生しました。');
+        }
+      }
+
+      function renderInteractionStatsUnavailable(message) {
+        interactionStatGrid.innerHTML = '';
+        interactionStatGeneratedAt.textContent = '';
+
+        exhibitorRankingTableBody.innerHTML = '';
+        const tr = document.createElement('tr');
+        tr.className = 'empty-row';
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.textContent = message;
+        tr.appendChild(td);
+        exhibitorRankingTableBody.appendChild(tr);
+      }
+
+      function renderInteractionStats(statsResult) {
+        const stats = statsResult || {};
+        const visitorInterestStats = stats.visitorInterestStats || { average: 0, max: 0 };
+
+        interactionStatGrid.innerHTML = '';
+
+        const cards = [
+          { value: stats.totalInteractions || 0, label: '総記録数' },
+          { value: stats.recordingVisitorCount || 0, label: '記録した来場者数' },
+          { value: stats.recordingExhibitorCount || 0, label: '記録した出展者数' },
+          { value: visitorInterestStats.average || 0, label: '来場者1人あたりの平均記録数' }
+        ];
+
+        cards.forEach(function (item) {
+          const card = document.createElement('div');
+          card.className = 'stat-card';
+
+          const value = document.createElement('div');
+          value.className = 'stat-card-value';
+          value.textContent = item.value;
+
+          const label = document.createElement('div');
+          label.className = 'stat-card-label';
+          label.textContent = item.label;
+
+          card.appendChild(value);
+          card.appendChild(label);
+          interactionStatGrid.appendChild(card);
+        });
+
+        interactionStatGeneratedAt.textContent = '集計日時: ' + (stats.generatedAt || '-');
+
+        renderExhibitorRankingTable(stats.exhibitorRanking || []);
+      }
+
+      function renderExhibitorRankingTable(ranking) {
+        exhibitorRankingTableBody.innerHTML = '';
+
+        if (ranking.length === 0) {
+          const tr = document.createElement('tr');
+          tr.className = 'empty-row';
+          const td = document.createElement('td');
+          td.colSpan = 3;
+          td.textContent = '該当するデータがありません。';
+          tr.appendChild(td);
+          exhibitorRankingTableBody.appendChild(tr);
+          return;
+        }
+
+        ranking.forEach(function (item, index) {
+          const tr = document.createElement('tr');
+
+          const rankTd = document.createElement('td');
+          rankTd.textContent = String(index + 1);
+
+          const nameTd = document.createElement('td');
+          nameTd.textContent = item.name || '';
+
+          const countTd = document.createElement('td');
+          countTd.textContent = String(item.uniqueVisitorCount || 0);
+
+          tr.appendChild(rankTd);
+          tr.appendChild(nameTd);
+          tr.appendChild(countTd);
+          exhibitorRankingTableBody.appendChild(tr);
+        });
       }
 
       // ----------------------------------------------------------------
