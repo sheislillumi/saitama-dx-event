@@ -468,7 +468,7 @@ function registerVisitor_(params) {
     // sendVisitorConfirmationEmail_ 内部で例外を握りつぶし ErrorLog シートに記録する
     // 設計だが、念のためここでも try/catch し、来場者登録自体は絶対に失敗させない。
     try {
-      sendVisitorConfirmationEmail_(id, qrToken, params.name, params.email);
+      sendVisitorConfirmationEmail_(id, qrToken, publicScanId, params.name, params.email);
     } catch (err) {
       logError_('QRコード生成/確認メール送信', id, qrToken, params.email, err && err.message ? err.message : String(err));
     }
@@ -489,9 +489,15 @@ function registerVisitor_(params) {
  * QRコード画像はメール送信時に一時的に使うだけで、Google Driveなどへの保存は行わない。
  * QRコード取得・メール送信のいずれに失敗しても例外を投げず、ErrorLogシートに記録する
  * のみに留める(呼び出し元の来場者登録処理を失敗させないための設計)。
+ *
+ * 【QRコードの中身について】受付でのチェックイン(checkin_)と出展者マイページでの
+ * 「気になった来場者」記録(logInterest_)の両方で共通の識別子として使えるよう、
+ * メールに埋め込むQRコード画像は「QRトークン」ではなく「公開スキャンID」から生成する。
+ * 一方、メール本文中の「マイページはこちら」リンクは、これまで通り「QRトークン」を
+ * 使ったURLのままとする(QRコードとしては表示しない、リンクのみ)。
  */
-function sendVisitorConfirmationEmail_(visitorId, qrToken, name, email) {
-  var qrBlob = fetchQrCodeImage_(qrToken, visitorId, email);
+function sendVisitorConfirmationEmail_(visitorId, qrToken, publicScanId, name, email) {
+  var qrBlob = fetchQrCodeImage_(publicScanId, visitorId, email);
   if (!qrBlob) {
     // QRコード画像が取得できない場合は、QRコードなしのメールを送るのではなく送信自体を
     // 見送る(エラーは fetchQrCodeImage_ 内で既に ErrorLog へ記録済み)。
@@ -511,15 +517,15 @@ function sendVisitorConfirmationEmail_(visitorId, qrToken, name, email) {
 }
 
 /**
- * QRトークンからQRコード画像(Blob)を取得する。
- * APIキー不要の外部サービス api.qrserver.com を使用する(Google Chart APIは廃止済みのため
- * 使用しない)。dataパラメータには、個人情報を含まないQRトークンのみを渡す。
+ * 指定した文字列(公開スキャンID等、個人情報を含まない識別子)からQRコード画像(Blob)を
+ * 取得する。APIキー不要の外部サービス api.qrserver.com を使用する(Google Chart APIは
+ * 廃止済みのため使用しない)。
  *
  * 外部サービスのため失敗する可能性を考慮し、1回だけリトライする(合計2回試行)。
  * 2回とも失敗した場合は ErrorLog シートにエラーを記録したうえで null を返す。
  */
-function fetchQrCodeImage_(qrToken, visitorId, email) {
-  var url = QR_CODE_API_URL + '?size=300x300&data=' + encodeURIComponent(qrToken);
+function fetchQrCodeImage_(qrData, visitorId, email) {
+  var url = QR_CODE_API_URL + '?size=300x300&data=' + encodeURIComponent(qrData);
   var lastErrorMessage = '';
 
   for (var attempt = 1; attempt <= 2; attempt++) {
@@ -534,7 +540,7 @@ function fetchQrCodeImage_(qrToken, visitorId, email) {
     }
   }
 
-  logError_('QRコード生成', visitorId, qrToken, email, lastErrorMessage || '不明なエラー(2回試行して失敗)');
+  logError_('QRコード生成', visitorId, qrData, email, lastErrorMessage || '不明なエラー(2回試行して失敗)');
   return null;
 }
 
@@ -900,7 +906,11 @@ function getMyInterests_(params) {
 // ==========================================================================
 
 /**
- * QRトークンを受け取り、該当来場者のチェックイン状態を更新する。
+ * 受付用QRコード(現在は「公開スキャンID」に統一)を受け取り、該当来場者のチェックイン
+ * 状態を更新する。パラメータ名は互換性のため qrToken のままだが、実際には来場者確認メールに
+ * 埋め込まれるQRコードの中身である「公開スキャンID」を渡すことを想定している。
+ * まず公開スキャンIDで検索し、見つからない場合は「QRトークン」列でもフォールバック検索する
+ * (公開スキャンIDへの統一前に送信済みの確認メールに埋め込まれたQRコードとの互換性のため)。
  * 必須パラメータ: qrToken
  * 任意パラメータ: location (受付場所: 展示ゾーン / 講演会場)
  */
@@ -914,10 +924,13 @@ function checkin_(params) {
   lock.waitLock(30000);
   try {
     var sheet = getSheet_(SHEET_NAMES.VISITORS);
-    var rowIndex = findRowByColumnValue_(sheet, VISITOR_HEADERS, 'QRトークン', params.qrToken);
+    var rowIndex = findRowByColumnValue_(sheet, VISITOR_HEADERS, '公開スキャンID', params.qrToken);
+    if (rowIndex === -1) {
+      rowIndex = findRowByColumnValue_(sheet, VISITOR_HEADERS, 'QRトークン', params.qrToken);
+    }
 
     if (rowIndex === -1) {
-      return errorResult_('not_found', '未登録のQRトークンです。手動登録をご案内してください。');
+      return errorResult_('not_found', '未登録のQRコードです。手動登録をご案内してください。');
     }
 
     var colIndex = buildColumnIndexMap_(VISITOR_HEADERS);
@@ -1588,11 +1601,33 @@ function test_registerVisitor(testEmail) {
     agreement: true
   });
   Logger.log(JSON.stringify(result, null, 2));
+
+  // 確認メールに埋め込まれるQRコードの中身が「公開スキャンID」になっていること
+  // (「QRトークン」ではないこと)を確認する。fetchQrCodeImage_ に渡される実際のURLと
+  // 同一の組み立て方で再構築し、ログ出力で目視確認できるようにする。
+  var sheet = getSheet_(SHEET_NAMES.VISITORS);
+  var rowIndex = findRowByColumnValue_(sheet, VISITOR_HEADERS, 'ID', result.id);
+  var colIndex = buildColumnIndexMap_(VISITOR_HEADERS);
+  var publicScanId = sheet.getRange(rowIndex, colIndex['公開スキャンID'] + 1).getValue();
+  var qrImageUrl = QR_CODE_API_URL + '?size=300x300&data=' + encodeURIComponent(publicScanId);
+
+  Logger.log('QRトークン(マイページリンク用、QRコードとしては表示しない): ' + result.qrToken);
+  Logger.log('公開スキャンID(確認メールのQRコードに埋め込まれる値): ' + publicScanId);
+  Logger.log('QRコード画像URL(fetchQrCodeImage_が実際に取得するURLと同一の組み立て): ' + qrImageUrl);
+
+  if (publicScanId && publicScanId !== result.qrToken) {
+    Logger.log('[OK] QRコードの中身は公開スキャンIDであり、マイページリンク用のQRトークンとは別の値です。');
+  } else {
+    Logger.log('[NG] 公開スキャンIDが空、またはQRトークンと同一の値になっています。');
+  }
+
   return result;
 }
 
 function test_checkin() {
   // 事前に test_registerVisitor() を実行し、発行された qrToken を貼り付けて実行する。
+  // 「公開スキャンID」への統一前に送信済みのQRコードとの互換性(フォールバック検索)の
+  // 回帰テストを兼ねる。公開スキャンID自体での受付は test_checkin_publicScanId_ を参照。
   var registerResult = test_registerVisitor();
   var result = checkin_({ qrToken: registerResult.qrToken, location: '展示ゾーン' });
   Logger.log(JSON.stringify(result, null, 2));
@@ -1614,6 +1649,30 @@ function test_checkin() {
     Logger.log('[OK] 成功時・重複時の checkinTime の書式が一致しました。');
   } else {
     Logger.log('[NG] checkinTime の書式が一致していません。期待する書式: yyyy-MM-dd HH:mm:ss');
+  }
+}
+
+/**
+ * checkin_ が「公開スキャンID」(確認メールのQRコードに実際に埋め込まれる値)で
+ * 受付できることを確認する回帰テスト。QRコード統一後の主経路の検証で、
+ * 「QRトークン」でのフォールバック経路の検証は test_checkin() を参照。
+ */
+function test_checkin_publicScanId_() {
+  var registerResult = test_registerVisitor();
+
+  var sheet = getSheet_(SHEET_NAMES.VISITORS);
+  var rowIndex = findRowByColumnValue_(sheet, VISITOR_HEADERS, 'ID', registerResult.id);
+  var publicScanId = sheet.getRange(
+    rowIndex, buildColumnIndexMap_(VISITOR_HEADERS)['公開スキャンID'] + 1
+  ).getValue();
+
+  var result = checkin_({ qrToken: publicScanId, location: '展示ゾーン' });
+  Logger.log('公開スキャンIDでの受付結果: ' + JSON.stringify(result, null, 2));
+
+  if (result && result.success && !result.alreadyCheckedIn) {
+    Logger.log('[OK] 公開スキャンIDでチェックインできました。');
+  } else {
+    Logger.log('[NG] 公開スキャンIDでのチェックインに失敗しました。');
   }
 }
 

@@ -124,8 +124,9 @@ Apps Script エディタから実行して確認します。
 
 1. 関数選択ドロップダウンで以下のいずれかを選び、[実行] する。
    - `test_registerExhibitor` — 出展申込登録のテスト
-   - `test_registerVisitor` — 来場者申込登録(UUID・QRトークン発行)のテスト
-   - `test_checkin` — 来場者登録 → チェックイン → 重複チェックインのテスト
+   - `test_registerVisitor` — 来場者申込登録(UUID・QRトークン・公開スキャンID発行)のテスト。確認メールのQRコードに埋め込まれる値が公開スキャンIDであることもログで確認できる
+   - `test_checkin` — 来場者登録 → チェックイン(QRトークンでのフォールバック経路)→ 重複チェックインのテスト
+   - `test_checkin_publicScanId_` — 公開スキャンIDでのチェックイン(QRコード統一後の主経路)のテスト
    - `test_getStats` — 集計取得のテスト
 2. 画面下部の [実行数] タブ、またはエディタ内の [ログを表示](`Ctrl+Enter`)でログを確認する。
 3. スプレッドシート側にも行が追加されていることを確認する。
@@ -165,8 +166,8 @@ curl -X POST "https://script.google.com/macros/s/xxxxxxxxxxxx/exec" `
 | action | 必須パラメータ | 概要 |
 |---|---|---|
 | `registerExhibitor` | companyName, contactName, email, phone, category | UUID・アクセストークンを発行しExhibitorsシートに追加。続けてGmailAppで「申請受付」の確認メール(QRコードなし。選定は委託者が行う旨、マイページ(`mypage/exhibitor/`)へのリンクを明記)を送信する。送信に失敗しても出展申込登録自体は失敗させず、ErrorLogシートにエラーを記録する |
-| `registerVisitor` | name, companyName, email, phone, agreement(true) | UUID・QRトークンを発行しVisitorsシートに追加。続けてQRコード画像を生成(api.qrserver.com)し、GmailAppで確認メール(QRコードをインライン画像として埋め込み、マイページ(`mypage/visitor/`)へのリンクも記載)を送信する。QRコード生成・メール送信に失敗しても来場者登録自体は失敗させず、ErrorLogシートにエラーを記録する |
-| `checkin` | qrToken | 該当来場者のチェックイン状態を更新。重複時は「受付済みです」を返す |
+| `registerVisitor` | name, companyName, email, phone, agreement(true) | UUID・QRトークン・公開スキャンIDを発行しVisitorsシートに追加。続けて公開スキャンIDからQRコード画像を生成(api.qrserver.com)し、GmailAppで確認メール(QRコードをインライン画像として埋め込み、マイページ(`mypage/visitor/`)へのリンクはQRトークンを使ったURLとして別途記載)を送信する。QRコード生成・メール送信に失敗しても来場者登録自体は失敗させず、ErrorLogシートにエラーを記録する |
+| `checkin` | qrToken | 該当来場者のチェックイン状態を更新。まず「公開スキャンID」列で検索し、見つからない場合のみ「QRトークン」列でもフォールバック検索する(公開スキャンIDへの統一前に送信済みの確認メールのQRコードとの互換性のため)。パラメータ名は互換性のため qrToken のままだが、実際に渡すのは受付QRコード(=公開スキャンID)の中身。重複時は「受付済みです」を返す |
 | `updateVisitor` | token, name, companyName, email, phone | マイページ(`mypage/visitor/`)から来場者本人が申込内容を編集。token(QRトークン)と完全一致する行のみ更新可能。ID・QRトークン・申込日時・チェックイン状態・チェックイン日時・受付場所はこのAPI経由では変更できない(パラメータに含まれていても無視される) |
 | `updateExhibitor` | token, companyName, contactName, email, phone, category | マイページ(`mypage/exhibitor/`)から出展者本人が申込内容を編集。token(アクセストークン)と完全一致する行のみ更新可能。ID・申込日時・ステータス(選定結果)・アクセストークンはこのAPI経由では変更できない(パラメータに含まれていても無視される。ステータスは委託者側の選定結果のため出展者本人は変更不可) |
 | `logInterest` | scannerType(exhibitor/visitor), scannerToken, targetPublicId | 「気になった相手を記録する」機能。scannerToken(QRトークン/アクセストークン、本人確認のみに使用しInteractionsシートには保存しない)で本人を特定し、targetPublicId(相手の公開スキャンID/公開ブースID)で相手を特定してInteractionsシートに記録する。対象種別はscannerTypeから自動判定(visitorがスキャン→対象はexhibitor、その逆も同様)。同一の組み合わせを再度記録した場合は新規行を追加せず記録日時・メモを上書き更新する。成功時、相手の表示名(targetName)を返す |
