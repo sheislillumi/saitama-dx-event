@@ -556,8 +556,9 @@ function buildVisitorConfirmationEmailHtml_(name, qrToken) {
     '<tr><td style="padding: 4px 12px 4px 0; color: #5c6b7a;">開催日時</td><td>' + EVENT_INFO.DATE_TEXT + '</td></tr>' +
     '<tr><td style="padding: 4px 12px 4px 0; color: #5c6b7a;">会場</td><td>' + EVENT_INFO.VENUE + '</td></tr>' +
     '</table>' +
-    '<p><strong>当日は、以下のQRコードを受付にてご提示ください。</strong></p>' +
-    '<p><img src="cid:qrCodeImage" alt="受付用QRコード" width="220" height="220" /></p>' +
+    '<p><strong>以下のQRコードは、当日の受付でのご提示、および出展者の方への提示、' +
+    '両方にお使いいただけます。</strong></p>' +
+    '<p><img src="cid:qrCodeImage" alt="ご自身の公開QRコード" width="220" height="220" /></p>' +
     '<p>QRコードが表示されない場合は、受付スタッフに本メールの件名またはお名前をお伝えください。</p>' +
     '<p>お申し込み内容の確認や、QRコードの再表示は、以下のマイページからいつでも行えます。<br />' +
     '<a href="' + mypageUrl + '">' + mypageUrl + '</a></p>' +
@@ -577,7 +578,7 @@ function buildVisitorConfirmationEmailPlainText_(name, qrToken) {
     '開催日時: ' + EVENT_INFO.DATE_TEXT,
     '会場: ' + EVENT_INFO.VENUE,
     '',
-    '当日は受付用QRコードをご提示ください。',
+    'このQRコードは、受付・出展者への提示どちらにもお使いいただけます。',
     '(このメールがHTML形式で表示されない場合は、受付スタッフにお名前をお伝えください)',
     '',
     'お申し込み内容の確認・QRコードの再表示は、以下のマイページから行えます。',
