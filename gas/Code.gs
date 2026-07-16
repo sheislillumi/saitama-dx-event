@@ -16,17 +16,21 @@
  * 3. デフォルトの Code.gs の中身を全て削除し、このファイルの内容を貼り付ける。
  * 4. Apps Script エディタの関数選択ドロップダウンで `setupSheets` を選び、
  *    [実行] ボタンを押す(初回は権限の承認が必要)。
- *    → 以下の3シートが自動作成され、見出し行が設定される。
+ *    → 以下の5シートが自動作成され、見出し行が設定される。
  *
- *   ■ シート「Exhibitors」(出展者) の列見出し(A列〜M列)
+ *   ■ シート「Exhibitors」(出展者) の列見出し(A列〜N列)
  *     ID | 申込日時 | 会社名 | 担当者名 | メールアドレス | 電話番号 |
  *     希望カテゴリ | 展示内容概要 | 電源要否 | 搬入出希望時間 | ステータス | 備考 |
- *     アクセストークン(出展者向けマイページ mypage/exhibitor/ のログインに使うトークン)
+ *     アクセストークン(出展者向けマイページ mypage/exhibitor/ のログインに使うトークン) |
+ *     公開ブースID(「気になった相手を記録する」機能で来場者がブースを読み取る際に使う
+ *     公開ID。アクセストークンとは別物で、これ単体からは個人情報を閲覧・編集できない)
  *
- *   ■ シート「Visitors」(来場者) の列見出し(A列〜N列)
+ *   ■ シート「Visitors」(来場者) の列見出し(A列〜O列)
  *     ID | QRトークン | 申込日時 | 氏名 | 会社名 | 部署役職 | メールアドレス |
  *     電話番号 | 業種 | 関心カテゴリ | 同伴者数 | チェックイン状態 |
- *     チェックイン日時 | 受付場所
+ *     チェックイン日時 | 受付場所 |
+ *     公開スキャンID(「気になった相手を記録する」機能で出展者が来場者を読み取る際に
+ *     使う公開ID。QRトークンとは別物で、これ単体からは個人情報を閲覧・編集できない)
  *
  *   ■ シート「Survey」(アンケート・任意) の列見出し(A列〜D列)
  *     ID | 来場者ID | 満足度 | 自由記述
@@ -36,6 +40,12 @@
  *     (registerVisitor_ でのQRコード画像取得・メール送信失敗時に自動で1行追記される。
  *      来場者登録自体はここでのエラーでは失敗させない設計のため、運用時はこのシートを
  *      定期的に確認し、送信できなかった来場者に個別フォローすること)
+ *
+ *   ■ シート「Interactions」(「気になった相手を記録する」機能の記録) の列見出し(A列〜I列)
+ *     ID | 記録日時 | スキャナー種別 | スキャナー公開ID | スキャナー表示名 |
+ *     対象種別 | 対象公開ID | 対象表示名 | メモ
+ *     (QRトークン・アクセストークンのような非公開トークンは一切保存しない。
+ *      logInterest_ から追記・更新される)
  *
  *    ※ 手動でシートを作る場合は、シート名・列見出し・列の並び順を上記と
  *      完全に一致させること(本スクリプトは見出し名でセルを解決している)。
@@ -95,27 +105,58 @@ var SHEET_NAMES = {
   EXHIBITORS: 'Exhibitors',
   VISITORS: 'Visitors',
   SURVEY: 'Survey',
-  ERROR_LOG: 'ErrorLog'
+  ERROR_LOG: 'ErrorLog',
+  INTERACTIONS: 'Interactions'
 };
 
 // スプレッドシートの列見出し(「4. データスキーマ」に準拠、この並び順でシートに書き込む)
-// アクセストークンは末尾に追加している(既存の本番シートで列を途中に挿入すると
-// 既存データの列がずれてしまうため、後方互換のため必ず末尾に追加すること)。
+// アクセストークン・公開ブースIDは末尾に追加している(既存の本番シートで列を途中に
+// 挿入すると既存データの列がずれてしまうため、後方互換のため必ず末尾に追加すること)。
 var EXHIBITOR_HEADERS = [
   'ID', '申込日時', '会社名', '担当者名', 'メールアドレス', '電話番号',
-  '希望カテゴリ', '展示内容概要', '電源要否', '搬入出希望時間', 'ステータス', '備考', 'アクセストークン'
+  '希望カテゴリ', '展示内容概要', '電源要否', '搬入出希望時間', 'ステータス', '備考',
+  'アクセストークン', '公開ブースID'
 ];
 
+// QRトークン・公開スキャンIDは同様に末尾に追加している。
 var VISITOR_HEADERS = [
   'ID', 'QRトークン', '申込日時', '氏名', '会社名', '部署役職', 'メールアドレス',
   '電話番号', '業種', '関心カテゴリ', '同伴者数', 'チェックイン状態',
-  'チェックイン日時', '受付場所'
+  'チェックイン日時', '受付場所', '公開スキャンID'
 ];
 
 var SURVEY_HEADERS = ['ID', '来場者ID', '満足度', '自由記述'];
 
 // QRコード生成・確認メール送信のエラーを記録するシート(registerVisitor_ 参照)
 var ERROR_LOG_HEADERS = ['日時', '種別', '来場者ID', 'QRトークン', 'メールアドレス', 'エラー内容'];
+
+// 「気になった相手を記録する」機能(logInterest_)の記録シート。
+// スキャナー公開ID・対象公開ID(公開スキャンID/公開ブースID)のみを記録し、
+// QRトークン・アクセストークンのような非公開トークンは一切保存しない。
+var INTERACTION_HEADERS = [
+  'ID', '記録日時', 'スキャナー種別', 'スキャナー公開ID', 'スキャナー表示名',
+  '対象種別', '対象公開ID', '対象表示名', 'メモ'
+];
+
+// 「気になった相手を記録する」機能で、scannerType/targetType('exhibitor'/'visitor')から
+// 対応するシート・見出し・非公開トークン列・公開ID列・表示名として使う列を引くための設定。
+// resolvePartyByToken_ / resolvePartyByPublicId_ から参照する。
+var PARTY_CONFIG = {
+  visitor: {
+    sheetName: SHEET_NAMES.VISITORS,
+    headers: VISITOR_HEADERS,
+    tokenColumn: 'QRトークン',
+    publicIdColumn: '公開スキャンID',
+    displayNameColumn: '氏名'
+  },
+  exhibitor: {
+    sheetName: SHEET_NAMES.EXHIBITORS,
+    headers: EXHIBITOR_HEADERS,
+    tokenColumn: 'アクセストークン',
+    publicIdColumn: '公開ブースID',
+    displayNameColumn: '会社名'
+  }
+};
 
 var EXHIBITOR_STATUS_DEFAULT = '申請中';
 var VISITOR_CHECKIN_STATUS_NONE = '未';
@@ -146,19 +187,25 @@ var EVENT_INFO = {
 
 /**
  * GET リクエストの窓口。action パラメータで分岐する。
- * 対応 action: getVisitors, getExhibitors, getStats (いずれも要APIキー)、
- *             getVisitorByToken, getExhibitorByToken (それぞれ本人向けマイページ用、APIキー不要)
+ * 対応 action: getVisitors, getExhibitors, getStats, getInteractionStats (いずれも要APIキー)、
+ *             getVisitorByToken, getExhibitorByToken, getMyInterests
+ *             (それぞれ本人向けマイページ・記録一覧用、APIキー不要)
  */
 function doGet(e) {
-  return handleRequest_(e, ['getVisitors', 'getExhibitors', 'getStats', 'getVisitorByToken', 'getExhibitorByToken']);
+  return handleRequest_(e, [
+    'getVisitors', 'getExhibitors', 'getStats', 'getInteractionStats',
+    'getVisitorByToken', 'getExhibitorByToken', 'getMyInterests'
+  ]);
 }
 
 /**
  * POST リクエストの窓口。action パラメータで分岐する。
- * 対応 action: registerExhibitor, registerVisitor, checkin, updateVisitor, updateExhibitor
+ * 対応 action: registerExhibitor, registerVisitor, checkin, updateVisitor, updateExhibitor, logInterest
  */
 function doPost(e) {
-  return handleRequest_(e, ['registerExhibitor', 'registerVisitor', 'checkin', 'updateVisitor', 'updateExhibitor']);
+  return handleRequest_(e, [
+    'registerExhibitor', 'registerVisitor', 'checkin', 'updateVisitor', 'updateExhibitor', 'logInterest'
+  ]);
 }
 
 /**
@@ -189,16 +236,22 @@ function handleRequest_(e, allowedActions) {
         return jsonResponse_(updateVisitor_(params));
       case 'updateExhibitor':
         return jsonResponse_(updateExhibitor_(params));
+      case 'logInterest':
+        return jsonResponse_(logInterest_(params));
       case 'getVisitors':
         return jsonResponse_(withAdminAuth_(params, getVisitors_));
       case 'getExhibitors':
         return jsonResponse_(withAdminAuth_(params, getExhibitors_));
       case 'getStats':
         return jsonResponse_(withAdminAuth_(params, getStats_));
+      case 'getInteractionStats':
+        return jsonResponse_(withAdminAuth_(params, getInteractionStats_));
       case 'getVisitorByToken':
         return jsonResponse_(getVisitorByToken_(params));
       case 'getExhibitorByToken':
         return jsonResponse_(getExhibitorByToken_(params));
+      case 'getMyInterests':
+        return jsonResponse_(getMyInterests_(params));
       default:
         return jsonResponse_(errorResult_('unknown_action', '不明な action です: ' + action));
     }
@@ -235,6 +288,7 @@ function registerExhibitor_(params) {
     var sheet = getSheet_(SHEET_NAMES.EXHIBITORS);
     var id = generateId_();
     var accessToken = generateAccessToken_();
+    var publicBoothId = generatePublicBoothId_();
     var record = {
       'ID': id,
       '申込日時': nowString_(),
@@ -248,7 +302,8 @@ function registerExhibitor_(params) {
       '搬入出希望時間': params.loadingTime || '',
       'ステータス': EXHIBITOR_STATUS_DEFAULT,
       '備考': params.notes || '',
-      'アクセストークン': accessToken
+      'アクセストークン': accessToken,
+      '公開ブースID': publicBoothId
     };
     appendRecord_(sheet, EXHIBITOR_HEADERS, record);
 
@@ -385,6 +440,7 @@ function registerVisitor_(params) {
     var sheet = getSheet_(SHEET_NAMES.VISITORS);
     var id = generateId_();
     var qrToken = generateQrToken_();
+    var publicScanId = generatePublicScanId_();
     var interests = Array.isArray(params.interests)
       ? params.interests.join(', ')
       : (params.interests || '');
@@ -403,7 +459,8 @@ function registerVisitor_(params) {
       '同伴者数': params.companions || 0,
       'チェックイン状態': VISITOR_CHECKIN_STATUS_NONE,
       'チェックイン日時': '',
-      '受付場所': ''
+      '受付場所': '',
+      '公開スキャンID': publicScanId
     };
     appendRecord_(sheet, VISITOR_HEADERS, record);
 
@@ -674,6 +731,171 @@ function updateExhibitor_(params) {
 
 
 // ==========================================================================
+// action ハンドラ: 気になった相手を記録する(logInterest)
+// ==========================================================================
+
+/**
+ * scannerType('exhibitor'/'visitor')と非公開トークン(QRトークン/アクセストークン)から、
+ * 本人の公開ID・表示名を取得する。PARTY_CONFIG を参照する resolvePartyByToken_ /
+ * resolvePartyByPublicId_ の共通処理を partyFromRow_ にまとめている。
+ * 見つからない場合は null を返す。
+ */
+function resolvePartyByToken_(partyType, token) {
+  var config = PARTY_CONFIG[partyType];
+  if (!config) return null;
+  var sheet = getSheet_(config.sheetName);
+  var rowIndex = findRowByColumnValue_(sheet, config.headers, config.tokenColumn, token);
+  if (rowIndex === -1) return null;
+  return partyFromRow_(config, sheet, rowIndex);
+}
+
+/**
+ * partyType('exhibitor'/'visitor')と公開ID(公開スキャンID/公開ブースID)から、該当者の
+ * 公開ID・表示名を取得する。QRトークン・アクセストークンのような非公開情報は一切参照・
+ * 返却しない。見つからない場合は null を返す。
+ */
+function resolvePartyByPublicId_(partyType, publicId) {
+  var config = PARTY_CONFIG[partyType];
+  if (!config) return null;
+  var sheet = getSheet_(config.sheetName);
+  var rowIndex = findRowByColumnValue_(sheet, config.headers, config.publicIdColumn, publicId);
+  if (rowIndex === -1) return null;
+  return partyFromRow_(config, sheet, rowIndex);
+}
+
+/** config(PARTY_CONFIGの1エントリ)と行番号から、{ publicId, displayName } を組み立てる。 */
+function partyFromRow_(config, sheet, rowIndex) {
+  var colIndex = buildColumnIndexMap_(config.headers);
+  var rowValues = sheet.getRange(rowIndex, 1, 1, config.headers.length).getValues()[0];
+  return {
+    publicId: rowValues[colIndex[config.publicIdColumn]],
+    displayName: rowValues[colIndex[config.displayNameColumn]]
+  };
+}
+
+/**
+ * Interactionsシート上で、指定したスキャナー公開ID・対象公開IDの組み合わせが既に
+ * 記録されている行番号(1始まり)を返す。見つからない場合は -1。
+ */
+function findInteractionRowIndex_(sheet, colIndex, scannerPublicId, targetPublicId) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return -1;
+
+  var values = sheet.getRange(2, 1, lastRow - 1, INTERACTION_HEADERS.length).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][colIndex['スキャナー公開ID']] === scannerPublicId && values[i][colIndex['対象公開ID']] === targetPublicId) {
+      return i + 2; // ヘッダー行(1行目)分のオフセット
+    }
+  }
+  return -1;
+}
+
+/**
+ * 「気になった相手を記録する」機能。来場者⇔出展者が相手の公開ID(QRコード等で読み取る)を
+ * 記録する。対象種別は scannerType から自動的に決まる('visitor'がスキャンする場合は
+ * 対象は出展ブース、'exhibitor'がスキャンする場合は対象は来場者)ため、パラメータとしては
+ * 受け取らない。
+ *
+ * 必須パラメータ: scannerType('exhibitor' または 'visitor'), scannerToken(本人確認用の
+ * 非公開トークン。本人確認にのみ使い、Interactionsシートには一切保存しない), targetPublicId
+ * 任意パラメータ: memo
+ *
+ * 同一のスキャナー・対象の組み合わせが既に記録されている場合は、新規行を追加せず
+ * 記録日時・メモを上書き更新する(同じ相手を複数回スキャンしても件数が重複しないように)。
+ */
+function logInterest_(params) {
+  var missing = requireFields_(params, ['scannerType', 'scannerToken', 'targetPublicId']);
+  if (missing.length > 0) {
+    return errorResult_('validation_error', '必須項目が不足しています: ' + missing.join(', '));
+  }
+  if (params.scannerType !== 'exhibitor' && params.scannerType !== 'visitor') {
+    return errorResult_('validation_error', 'scannerType は exhibitor または visitor を指定してください。');
+  }
+
+  var scanner = resolvePartyByToken_(params.scannerType, params.scannerToken);
+  if (!scanner) {
+    return errorResult_('unauthorized', 'scannerToken が無効です。');
+  }
+
+  var targetType = params.scannerType === 'visitor' ? 'exhibitor' : 'visitor';
+  var target = resolvePartyByPublicId_(targetType, params.targetPublicId);
+  if (!target) {
+    return errorResult_('not_found', '指定された相手が見つかりません。');
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var sheet = getSheet_(SHEET_NAMES.INTERACTIONS);
+    var colIndex = buildColumnIndexMap_(INTERACTION_HEADERS);
+    var rowIndex = findInteractionRowIndex_(sheet, colIndex, scanner.publicId, target.publicId);
+    var now = nowString_();
+    var memo = params.memo || '';
+
+    if (rowIndex === -1) {
+      appendRecord_(sheet, INTERACTION_HEADERS, {
+        'ID': generateId_(),
+        '記録日時': now,
+        'スキャナー種別': params.scannerType,
+        'スキャナー公開ID': scanner.publicId,
+        'スキャナー表示名': scanner.displayName,
+        '対象種別': targetType,
+        '対象公開ID': target.publicId,
+        '対象表示名': target.displayName,
+        'メモ': memo
+      });
+    } else {
+      // 重複記録: 新規行を追加せず、記録日時・メモのみ上書き更新する。
+      sheet.getRange(rowIndex, colIndex['記録日時'] + 1).setValue(now);
+      sheet.getRange(rowIndex, colIndex['メモ'] + 1).setValue(memo);
+    }
+
+    return successResult_({ targetName: target.displayName });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * 本人(scannerType/scannerToken)がこれまで記録した相手の一覧を取得する。
+ * 必須パラメータ: scannerType, scannerToken
+ * 対象公開ID等の内部情報は含めず、画面表示に必要な項目のみを返す。
+ */
+function getMyInterests_(params) {
+  var missing = requireFields_(params, ['scannerType', 'scannerToken']);
+  if (missing.length > 0) {
+    return errorResult_('validation_error', '必須項目が不足しています: ' + missing.join(', '));
+  }
+  if (params.scannerType !== 'exhibitor' && params.scannerType !== 'visitor') {
+    return errorResult_('validation_error', 'scannerType は exhibitor または visitor を指定してください。');
+  }
+
+  var scanner = resolvePartyByToken_(params.scannerType, params.scannerToken);
+  if (!scanner) {
+    return errorResult_('unauthorized', 'scannerToken が無効です。');
+  }
+
+  var sheet = getSheet_(SHEET_NAMES.INTERACTIONS);
+  var interests = sheetToObjects_(sheet, INTERACTION_HEADERS)
+    .filter(function (row) {
+      return row['スキャナー公開ID'] === scanner.publicId;
+    })
+    .map(function (row) {
+      return {
+        targetName: row['対象表示名'],
+        recordedAt: row['記録日時'],
+        memo: row['メモ']
+      };
+    })
+    .sort(function (a, b) {
+      return a.recordedAt < b.recordedAt ? 1 : -1; // 新しい記録が先頭に来るように降順ソート
+    });
+
+  return successResult_({ interests: interests });
+}
+
+
+// ==========================================================================
 // action ハンドラ: QRコード受付(チェックイン)
 // ==========================================================================
 
@@ -848,6 +1070,61 @@ function getStats_() {
   });
 }
 
+/**
+ * 「気になった相手を記録する」機能(Interactionsシート)の集計データを取得する(管理者用)。
+ * - exhibitorRanking: 出展者ごとの「記録した来場者数(ユニーク)」を多い順にランキング
+ * - visitorInterestStats: 来場者ごとの「記録した出展者数」の分布(平均・最大)
+ * - recordingExhibitorCount / recordingVisitorCount: それぞれ最低1件記録した実人数
+ */
+function getInteractionStats_() {
+  var interactions = sheetToObjects_(getSheet_(SHEET_NAMES.INTERACTIONS), INTERACTION_HEADERS);
+
+  // スキャナー公開ID -> { name, targetIds: { 対象公開ID: true, ... } }
+  var exhibitorTargets = {};
+  var visitorTargets = {};
+
+  interactions.forEach(function (row) {
+    var bucket = row['スキャナー種別'] === 'exhibitor' ? exhibitorTargets : (row['スキャナー種別'] === 'visitor' ? visitorTargets : null);
+    if (!bucket) return; // 想定外のスキャナー種別が記録されていた場合は集計対象から除外する
+
+    var key = row['スキャナー公開ID'];
+    if (!bucket[key]) {
+      bucket[key] = { name: row['スキャナー表示名'], targetIds: {} };
+    }
+    bucket[key].targetIds[row['対象公開ID']] = true;
+  });
+
+  var exhibitorRanking = Object.keys(exhibitorTargets).map(function (key) {
+    return {
+      name: exhibitorTargets[key].name,
+      uniqueVisitorCount: Object.keys(exhibitorTargets[key].targetIds).length
+    };
+  }).sort(function (a, b) {
+    return b.uniqueVisitorCount - a.uniqueVisitorCount;
+  });
+
+  var visitorExhibitorCounts = Object.keys(visitorTargets).map(function (key) {
+    return Object.keys(visitorTargets[key].targetIds).length;
+  });
+  var visitorExhibitorCountTotal = visitorExhibitorCounts.reduce(function (sum, n) { return sum + n; }, 0);
+  var visitorExhibitorCountAverage = visitorExhibitorCounts.length > 0
+    ? Math.round((visitorExhibitorCountTotal / visitorExhibitorCounts.length) * 10) / 10
+    : 0;
+  var visitorExhibitorCountMax = visitorExhibitorCounts.length > 0 ? Math.max.apply(null, visitorExhibitorCounts) : 0;
+
+  return successResult_({
+    totalInteractions: interactions.length,
+    exhibitorRanking: exhibitorRanking, // [{ name, uniqueVisitorCount }] 多い順
+    recordingExhibitorCount: exhibitorRanking.length, // 来場者を1件以上記録した出展者の実人数
+    recordingVisitorCount: visitorExhibitorCounts.length, // 出展者を1件以上記録した来場者の実人数
+    visitorInterestStats: {
+      average: visitorExhibitorCountAverage, // 来場者1人あたりの記録出展者数(平均)
+      max: visitorExhibitorCountMax // 来場者1人あたりの記録出展者数(最大)
+    },
+    generatedAt: nowString_()
+  });
+}
+
 
 // ==========================================================================
 // スプレッドシート セットアップ用ユーティリティ(初回に手動実行する)
@@ -863,7 +1140,8 @@ function setupSheets() {
   ensureSheetWithHeaders_(ss, SHEET_NAMES.VISITORS, VISITOR_HEADERS);
   ensureSheetWithHeaders_(ss, SHEET_NAMES.SURVEY, SURVEY_HEADERS);
   ensureSheetWithHeaders_(ss, SHEET_NAMES.ERROR_LOG, ERROR_LOG_HEADERS);
-  Logger.log('セットアップ完了: Exhibitors / Visitors / Survey / ErrorLog シートを作成・確認しました。');
+  ensureSheetWithHeaders_(ss, SHEET_NAMES.INTERACTIONS, INTERACTION_HEADERS);
+  Logger.log('セットアップ完了: Exhibitors / Visitors / Survey / ErrorLog / Interactions シートを作成・確認しました。');
 }
 
 function ensureSheetWithHeaders_(ss, sheetName, headers) {
@@ -927,6 +1205,33 @@ function fixPhoneNumberFormatForSheet_(sheet, headers) {
 }
 
 /**
+ * 【一時的な修正関数の共通処理】指定シートの指定列(トークン/公開ID列)が空の行にのみ、
+ * generatorFn() で新規発行した値を書き込む(既に値が入っている行は上書きしない)。
+ * 発行件数を返す。fixPhoneNumberFormat_ 系と同様、既存データ移行の一度きりの実行を
+ * 想定した処理で、backfillExhibitorTokens_ / backfillPublicScanIds_ から呼び出される。
+ */
+function backfillMissingTokenColumn_(sheet, headers, columnName, generatorFn) {
+  var colIndex = buildColumnIndexMap_(headers)[columnName];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+
+  var range = sheet.getRange(2, 1, lastRow - 1, headers.length);
+  var values = range.getValues();
+  var updatedCount = 0;
+
+  values.forEach(function (row) {
+    if (row[0] === '' || row[0] === null) return; // ID空行はスキップ
+    if (row[colIndex] === '' || row[colIndex] === null) {
+      row[colIndex] = generatorFn();
+      updatedCount++;
+    }
+  });
+
+  range.setValues(values);
+  return updatedCount;
+}
+
+/**
  * 【一時的な修正関数】既にアクセストークンなしで登録されている出展者行に、
  * 後からアクセストークンを発行して書き込む。
  *
@@ -940,28 +1245,34 @@ function fixPhoneNumberFormatForSheet_(sheet, headers) {
  * fixPhoneNumberFormat_ と同様、既存データ移行のための一度きりの実行を想定した関数。
  */
 function backfillExhibitorTokens_() {
-  var sheet = getSheet_(SHEET_NAMES.EXHIBITORS);
-  var tokenColIndex = buildColumnIndexMap_(EXHIBITOR_HEADERS)['アクセストークン'];
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) {
-    Logger.log('Exhibitorsシートにデータ行がありません。');
-    return;
-  }
-
-  var range = sheet.getRange(2, 1, lastRow - 1, EXHIBITOR_HEADERS.length);
-  var values = range.getValues();
-  var updatedCount = 0;
-
-  values.forEach(function (row) {
-    if (row[0] === '' || row[0] === null) return; // ID空行はスキップ
-    if (row[tokenColIndex] === '' || row[tokenColIndex] === null) {
-      row[tokenColIndex] = generateAccessToken_();
-      updatedCount++;
-    }
-  });
-
-  range.setValues(values);
+  var updatedCount = backfillMissingTokenColumn_(
+    getSheet_(SHEET_NAMES.EXHIBITORS), EXHIBITOR_HEADERS, 'アクセストークン', generateAccessToken_
+  );
   Logger.log('アクセストークンのバックフィルが完了しました。発行件数: ' + updatedCount + ' 件。');
+}
+
+/**
+ * 【一時的な修正関数】既に公開スキャンID(来場者)/公開ブースID(出展者)なしで
+ * 登録されている行に、後から公開IDを発行して書き込む。
+ *
+ * これらの公開ID列は「気になった相手を記録する」機能(logInterest)で相手を特定する
+ * ために使う。列を追加する前に登録された申込みは、この列が空のままになっている。
+ * backfillExhibitorTokens_ と同様、既存データ移行のための一度きりの実行を想定した関数。
+ *
+ * 【使い方】Apps Script エディタの関数選択ドロップダウンで
+ * `backfillPublicScanIds_` を選び、[実行] ボタンを押して手動で1回だけ実行する。
+ */
+function backfillPublicScanIds_() {
+  var visitorUpdatedCount = backfillMissingTokenColumn_(
+    getSheet_(SHEET_NAMES.VISITORS), VISITOR_HEADERS, '公開スキャンID', generatePublicScanId_
+  );
+  var exhibitorUpdatedCount = backfillMissingTokenColumn_(
+    getSheet_(SHEET_NAMES.EXHIBITORS), EXHIBITOR_HEADERS, '公開ブースID', generatePublicBoothId_
+  );
+  Logger.log(
+    '公開IDのバックフィルが完了しました。来場者(公開スキャンID): ' + visitorUpdatedCount +
+    ' 件、出展者(公開ブースID): ' + exhibitorUpdatedCount + ' 件。'
+  );
 }
 
 
@@ -1116,6 +1427,26 @@ function generateQrToken_() {
  * 個人情報を含まないランダム文字列(32桁の16進数)。
  */
 function generateAccessToken_() {
+  return generateRandomToken_();
+}
+
+/**
+ * 来場者向けの公開スキャンIDを発行する(「気になった相手を記録する」機能で、出展者が
+ * 来場者を読み取って記録するために使う公開ID)。QRトークンとは別物で、この値単体からは
+ * 氏名・連絡先等の個人情報を閲覧・編集することは一切できない(getVisitorByToken/
+ * updateVisitor は引き続きQRトークンでのみ照合する)。
+ */
+function generatePublicScanId_() {
+  return generateRandomToken_();
+}
+
+/**
+ * 出展者向けの公開ブースIDを発行する(「気になった相手を記録する」機能で、来場者が
+ * ブースを読み取って記録するために使う公開ID)。アクセストークンとは別物で、この値単体
+ * からは会社名・連絡先等の個人情報を閲覧・編集することは一切できない(getExhibitorByToken/
+ * updateExhibitor は引き続きアクセストークンでのみ照合する)。
+ */
+function generatePublicBoothId_() {
   return generateRandomToken_();
 }
 
@@ -1288,6 +1619,86 @@ function test_checkin() {
 
 function test_getStats() {
   Logger.log(JSON.stringify(getStats_(), null, 2));
+}
+
+/**
+ * 「気になった相手を記録する」機能(logInterest_/getMyInterests_/getInteractionStats_)の
+ * 一連の動作確認用テスト。来場者→出展者、出展者→来場者の双方向で記録し、Interactions
+ * シートに正しく書き込まれるか、同じ相手を2回記録した場合に重複行が増えず記録日時・メモが
+ * 上書きされるかを確認する。
+ */
+function test_logInterest() {
+  var visitorResult = test_registerVisitor();
+  var exhibitorResult = registerExhibitor_({
+    companyName: 'テスト興味記録株式会社',
+    contactName: '記録次郎',
+    email: 'interest-test@example.com',
+    phone: '048-111-2222',
+    category: '汎用ツール'
+  });
+
+  var visitorSheet = getSheet_(SHEET_NAMES.VISITORS);
+  var visitorRowIndex = findRowByColumnValue_(visitorSheet, VISITOR_HEADERS, 'ID', visitorResult.id);
+  var visitorPublicId = visitorSheet.getRange(
+    visitorRowIndex, buildColumnIndexMap_(VISITOR_HEADERS)['公開スキャンID'] + 1
+  ).getValue();
+
+  var exhibitorSheet = getSheet_(SHEET_NAMES.EXHIBITORS);
+  var exhibitorRowIndex = findRowByColumnValue_(exhibitorSheet, EXHIBITOR_HEADERS, 'ID', exhibitorResult.id);
+  var exhibitorPublicId = exhibitorSheet.getRange(
+    exhibitorRowIndex, buildColumnIndexMap_(EXHIBITOR_HEADERS)['公開ブースID'] + 1
+  ).getValue();
+
+  // 来場者が出展ブースを記録
+  var result1 = logInterest_({
+    scannerType: 'visitor',
+    scannerToken: visitorResult.qrToken,
+    targetPublicId: exhibitorPublicId,
+    memo: '後で詳しく聞く'
+  });
+  Logger.log('1回目(来場者→出展者)記録結果: ' + JSON.stringify(result1));
+
+  // 同じ相手をもう一度記録(重複行が増えず、記録日時・メモが上書きされることを確認)
+  var result2 = logInterest_({
+    scannerType: 'visitor',
+    scannerToken: visitorResult.qrToken,
+    targetPublicId: exhibitorPublicId,
+    memo: 'やっぱり気になる'
+  });
+  Logger.log('2回目(同じ相手を再記録)結果: ' + JSON.stringify(result2));
+
+  var interactionSheet = getSheet_(SHEET_NAMES.INTERACTIONS);
+  var matchingRows = sheetToObjects_(interactionSheet, INTERACTION_HEADERS).filter(function (row) {
+    return row['スキャナー公開ID'] === visitorPublicId && row['対象公開ID'] === exhibitorPublicId;
+  });
+  Logger.log('該当する記録行数(1件であるべき): ' + matchingRows.length);
+  if (matchingRows.length === 1 && matchingRows[0]['メモ'] === 'やっぱり気になる') {
+    Logger.log('[OK] 重複記録時に新規行を追加せず、メモが上書き更新されました。');
+  } else {
+    Logger.log('[NG] 重複記録の上書き更新が正しく行われていません。');
+  }
+
+  // 出展者が来場者を記録(逆方向)
+  var result3 = logInterest_({
+    scannerType: 'exhibitor',
+    scannerToken: exhibitorResult.accessToken,
+    targetPublicId: visitorPublicId
+  });
+  Logger.log('出展者→来場者 記録結果: ' + JSON.stringify(result3));
+
+  // 存在しない公開IDを指定した場合はエラーになることを確認
+  var notFoundResult = logInterest_({
+    scannerType: 'visitor',
+    scannerToken: visitorResult.qrToken,
+    targetPublicId: 'no-such-public-id'
+  });
+  Logger.log('存在しない対象を指定した場合の結果(not_foundになるべき): ' + JSON.stringify(notFoundResult));
+
+  var myInterests = getMyInterests_({ scannerType: 'visitor', scannerToken: visitorResult.qrToken });
+  Logger.log('来場者本人の記録一覧: ' + JSON.stringify(myInterests, null, 2));
+
+  var stats = getInteractionStats_();
+  Logger.log('集計結果: ' + JSON.stringify(stats, null, 2));
 }
 
 /**
