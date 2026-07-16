@@ -14,29 +14,115 @@
   <main class="page-container">
     <h1 class="page-title">マイページ</h1>
     <p class="page-lead">
-      ご来場のお申し込み内容と、受付用QRコード・チェックイン状況をご確認いただけます。
+      ご来場のお申し込み内容の確認・編集と、受付用QRコード・チェックイン状況の確認ができます。
+      内容を変更した場合は、下部の「保存」ボタンを押してください。
     </p>
 
     <div id="loadingState" class="form-message" role="status">読み込み中です...</div>
     <div id="errorState" class="form-message form-message--error" role="alert" hidden></div>
 
     <div id="contentState" hidden>
-      <section class="form-card">
+      <div id="formMessage" class="form-message" role="alert" hidden></div>
+
+      <form id="visitorEditForm" class="form-card" novalidate>
         <h2 class="form-section-title">お申し込み内容</h2>
-        <table class="info-table">
-          <tbody>
-            <tr><th>氏名</th><td id="fieldName"></td></tr>
-            <tr><th>会社名</th><td id="fieldCompanyName"></td></tr>
-            <tr><th>部署・役職</th><td id="fieldDepartment"></td></tr>
-            <tr><th>メールアドレス</th><td id="fieldEmail"></td></tr>
-            <tr><th>電話番号</th><td id="fieldPhone"></td></tr>
-            <tr><th>業種</th><td id="fieldIndustry"></td></tr>
-            <tr><th>関心カテゴリ</th><td id="fieldInterests"></td></tr>
-            <tr><th>同伴者数</th><td id="fieldCompanions"></td></tr>
-            <tr><th>申込日時</th><td id="fieldAppliedAt"></td></tr>
-          </tbody>
-        </table>
-      </section>
+
+        <div class="form-group">
+          <label class="form-label" for="appliedAt">申込日時</label>
+          <input type="text" id="appliedAt" readonly />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="name">氏名<span class="required-badge">必須</span></label>
+          <input type="text" id="name" name="name" autocomplete="name" required />
+          <p class="field-error" data-error-for="name">氏名を入力してください。</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="companyName">会社名<span class="required-badge">必須</span></label>
+          <input type="text" id="companyName" name="companyName" autocomplete="organization" required />
+          <p class="field-error" data-error-for="companyName">会社名を入力してください。</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="department">部署・役職<span class="optional-badge">任意</span></label>
+          <input type="text" id="department" name="department" autocomplete="organization-title" placeholder="例: 営業部 課長" />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="email">メールアドレス<span class="required-badge">必須</span></label>
+            <input type="email" id="email" name="email" autocomplete="email" required />
+            <p class="field-error" data-error-for="email">メールアドレスを正しい形式で入力してください。</p>
+            <p class="field-warning" id="emailTypoWarning" hidden></p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="emailConfirm">メールアドレス(確認用)<span class="required-badge">必須</span></label>
+            <input type="email" id="emailConfirm" name="emailConfirm" autocomplete="email" required />
+            <p class="field-error" data-error-for="emailConfirm">メールアドレスが一致しません。</p>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="phone">電話番号<span class="required-badge">必須</span></label>
+          <input type="tel" id="phone" name="phone" autocomplete="tel" placeholder="例: 090-1234-5678" required />
+          <p class="field-error" data-error-for="phone">電話番号を入力してください。</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="industry">業種<span class="optional-badge">任意</span></label>
+          <select id="industry" name="industry">
+            <option value="">選択してください</option>
+            <option value="製造業">製造業</option>
+            <option value="卸売・小売業">卸売・小売業</option>
+            <option value="建設業">建設業</option>
+            <option value="運輸業">運輸業</option>
+            <option value="情報通信業">情報通信業</option>
+            <option value="金融・保険業">金融・保険業</option>
+            <option value="医療・福祉">医療・福祉</option>
+            <option value="宿泊・飲食サービス業">宿泊・飲食サービス業</option>
+            <option value="教育">教育</option>
+            <option value="農林水産業">農林水産業</option>
+            <option value="公務">公務</option>
+            <option value="その他">その他</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <span class="form-label">関心カテゴリ<span class="optional-badge">任意・複数選択可</span></span>
+          <div class="checkbox-group" id="interestsGroup">
+            <label class="checkbox-item">
+              <input type="checkbox" name="interests" value="汎用ツール" />
+              <span>汎用ツール</span>
+            </label>
+            <label class="checkbox-item">
+              <input type="checkbox" name="interests" value="業種共通ソリューション" />
+              <span>業種共通ソリューション</span>
+            </label>
+            <label class="checkbox-item">
+              <input type="checkbox" name="interests" value="業種特化ソリューション" />
+              <span>業種特化ソリューション</span>
+            </label>
+            <label class="checkbox-item">
+              <input type="checkbox" name="interests" value="DX大賞表彰式" />
+              <span>DX大賞表彰式</span>
+            </label>
+            <label class="checkbox-item">
+              <input type="checkbox" name="interests" value="講演・セミナー" />
+              <span>講演・セミナー</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="companions">同伴者数<span class="optional-badge">任意</span></label>
+          <input type="number" id="companions" name="companions" min="0" step="1" value="0" style="max-width: 8rem" />
+          <p class="form-hint">ご本人を除く同伴者の人数をご入力ください。</p>
+        </div>
+
+        <button type="submit" class="btn btn-block" id="saveBtn">保存</button>
+      </form>
 
       <section class="form-card">
         <h2 class="form-section-title">受付用QRコード</h2>
@@ -62,6 +148,7 @@
     </div>
   </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/mailcheck@1.1.2/src/mailcheck.min.js"></script>
   <script src="../../assets/js/common.js"></script>
   <script src="../../assets/js/api-client.js"></script>
   <script>
@@ -69,6 +156,75 @@
       const loadingState = document.getElementById('loadingState');
       const errorState = document.getElementById('errorState');
       const contentState = document.getElementById('contentState');
+      const formMessage = document.getElementById('formMessage');
+
+      const form = document.getElementById('visitorEditForm');
+      const saveBtn = document.getElementById('saveBtn');
+
+      const token = new URLSearchParams(window.location.search).get('token');
+      const requiredFields = ['name', 'companyName', 'email', 'emailConfirm', 'phone'];
+
+      function fieldGroup(name) {
+        return form.elements[name].closest('.form-group');
+      }
+
+      function setFieldError(name, isError) {
+        const group = fieldGroup(name);
+        const errorEl = form.querySelector('[data-error-for="' + name + '"]');
+        if (group) group.classList.toggle('has-error', isError);
+        if (errorEl) errorEl.classList.toggle('is-visible', isError);
+      }
+
+      function checkEmailMatch() {
+        const email = form.elements.email.value.trim();
+        const emailConfirm = form.elements.emailConfirm.value.trim();
+        const mismatch = emailConfirm !== '' && email !== emailConfirm;
+        setFieldError('emailConfirm', mismatch);
+        return !mismatch;
+      }
+
+      form.elements.email.addEventListener('input', checkEmailMatch);
+      form.elements.emailConfirm.addEventListener('input', checkEmailMatch);
+
+      CommonUtils.attachEmailTypoCheck(form.elements.email, document.getElementById('emailTypoWarning'));
+
+      function validate() {
+        let isValid = true;
+
+        requiredFields.forEach(function (name) {
+          const isEmpty = form.elements[name].value.trim() === '';
+          setFieldError(name, isEmpty);
+          if (isEmpty) isValid = false;
+        });
+
+        const email = form.elements.email.value.trim();
+        if (email !== '' && !CommonUtils.isValidEmail(email)) {
+          setFieldError('email', true);
+          isValid = false;
+        }
+
+        if (!checkEmailMatch()) {
+          isValid = false;
+        }
+
+        return isValid;
+      }
+
+      function getSelectedInterests() {
+        return Array.from(form.querySelectorAll('input[name="interests"]:checked')).map(function (el) {
+          return el.value;
+        });
+      }
+
+      function setSelectedInterests(interestsText) {
+        const selected = (interestsText || '')
+          .split(',')
+          .map(function (s) { return s.trim(); })
+          .filter(function (s) { return s !== ''; });
+        form.querySelectorAll('input[name="interests"]').forEach(function (el) {
+          el.checked = selected.indexOf(el.value) !== -1;
+        });
+      }
 
       function showError(message) {
         loadingState.hidden = true;
@@ -77,20 +233,17 @@
         errorState.textContent = message;
       }
 
-      function showContent(visitor, token) {
-        loadingState.hidden = true;
-        errorState.hidden = true;
-        contentState.hidden = false;
-
-        document.getElementById('fieldName').textContent = visitor['氏名'] || '';
-        document.getElementById('fieldCompanyName').textContent = visitor['会社名'] || '';
-        document.getElementById('fieldDepartment').textContent = visitor['部署役職'] || '(未入力)';
-        document.getElementById('fieldEmail').textContent = visitor['メールアドレス'] || '';
-        document.getElementById('fieldPhone').textContent = visitor['電話番号'] || '';
-        document.getElementById('fieldIndustry').textContent = visitor['業種'] || '(未入力)';
-        document.getElementById('fieldInterests').textContent = visitor['関心カテゴリ'] || '(未選択)';
-        document.getElementById('fieldCompanions').textContent = (visitor['同伴者数'] || 0) + ' 名';
-        document.getElementById('fieldAppliedAt').textContent = visitor['申込日時'] || '';
+      function populateForm(visitor) {
+        document.getElementById('appliedAt').value = visitor['申込日時'] || '';
+        form.elements.name.value = visitor['氏名'] || '';
+        form.elements.companyName.value = visitor['会社名'] || '';
+        form.elements.department.value = visitor['部署役職'] || '';
+        form.elements.email.value = visitor['メールアドレス'] || '';
+        form.elements.emailConfirm.value = visitor['メールアドレス'] || '';
+        form.elements.phone.value = visitor['電話番号'] || '';
+        form.elements.industry.value = visitor['業種'] || '';
+        setSelectedInterests(visitor['関心カテゴリ']);
+        form.elements.companions.value = visitor['同伴者数'] || 0;
 
         document.getElementById('qrCodeImage').src =
           'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(token);
@@ -104,18 +257,18 @@
         document.getElementById('fieldCheckinLocation').textContent = visitor['受付場所'] || '(未受付)';
       }
 
-      async function init() {
-        const token = new URLSearchParams(window.location.search).get('token');
+      function showContent(visitor) {
+        loadingState.hidden = true;
+        errorState.hidden = true;
+        contentState.hidden = false;
+        populateForm(visitor);
+      }
 
-        if (!token) {
-          showError('URLが正しくありません。確認メールに記載されたリンクからアクセスしてください。');
-          return;
-        }
-
+      async function load() {
         try {
           const result = await callGasApiGet('getVisitorByToken', { token: token });
           if (result && result.success && result.visitor) {
-            showContent(result.visitor, token);
+            showContent(result.visitor);
           } else if (result && result.error === 'not_found') {
             showError('該当するお申し込み情報が見つかりませんでした。URLをご確認のうえ、確認メールに記載されたリンクからアクセスしてください。');
           } else {
@@ -126,7 +279,59 @@
         }
       }
 
-      init();
+      form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        CommonUtils.clearMessage(formMessage);
+
+        if (!validate()) {
+          CommonUtils.showMessage(formMessage, 'error', '入力内容をご確認のうえ、赤字の項目を修正してください。');
+          return;
+        }
+
+        const payload = {
+          token: token,
+          name: form.elements.name.value.trim(),
+          companyName: form.elements.companyName.value.trim(),
+          department: form.elements.department.value.trim(),
+          email: form.elements.email.value.trim(),
+          phone: form.elements.phone.value.trim(),
+          industry: form.elements.industry.value,
+          interests: getSelectedInterests(),
+          companions: Number(form.elements.companions.value) || 0
+        };
+
+        CommonUtils.setLoading(saveBtn, true, '保存中...', '保存');
+
+        try {
+          const result = await callGasApi('updateVisitor', payload);
+          if (result && result.success && result.visitor) {
+            populateForm(result.visitor);
+            CommonUtils.showMessage(formMessage, 'success', '更新しました');
+          } else if (result && result.error === 'not_found') {
+            CommonUtils.showMessage(formMessage, 'error', '該当するお申し込み情報が見つかりませんでした。ページを再読み込みしてお試しください。');
+          } else {
+            CommonUtils.showMessage(
+              formMessage,
+              'error',
+              (result && result.message) || '更新に失敗しました。時間をおいて再度お試しください。'
+            );
+          }
+        } catch (err) {
+          CommonUtils.showMessage(
+            formMessage,
+            'error',
+            '通信エラーが発生しました。ネットワーク環境をご確認のうえ、再度お試しください。'
+          );
+        } finally {
+          CommonUtils.setLoading(saveBtn, false, '保存中...', '保存');
+        }
+      });
+
+      if (!token) {
+        showError('URLが正しくありません。確認メールに記載されたリンクからアクセスしてください。');
+      } else {
+        load();
+      }
     })();
   </script>
 </body>

@@ -148,10 +148,10 @@ function doGet(e) {
 
 /**
  * POST リクエストの窓口。action パラメータで分岐する。
- * 対応 action: registerExhibitor, registerVisitor, checkin
+ * 対応 action: registerExhibitor, registerVisitor, checkin, updateVisitor
  */
 function doPost(e) {
-  return handleRequest_(e, ['registerExhibitor', 'registerVisitor', 'checkin']);
+  return handleRequest_(e, ['registerExhibitor', 'registerVisitor', 'checkin', 'updateVisitor']);
 }
 
 /**
@@ -178,6 +178,8 @@ function handleRequest_(e, allowedActions) {
         return jsonResponse_(registerVisitor_(params));
       case 'checkin':
         return jsonResponse_(checkin_(params));
+      case 'updateVisitor':
+        return jsonResponse_(updateVisitor_(params));
       case 'getVisitors':
         return jsonResponse_(withAdminAuth_(params, getVisitors_));
       case 'getExhibitors':
@@ -528,6 +530,66 @@ function logError_(type, visitorId, qrToken, email, message) {
     });
   } catch (err) {
     Logger.log('[ERROR] ErrorLogシートへの記録に失敗しました: ' + (err && err.message ? err.message : String(err)));
+  }
+}
+
+
+// ==========================================================================
+// action ハンドラ: 来場者マイページ編集
+// ==========================================================================
+
+/**
+ * 来場者本人がマイページ(mypage/visitor/)から申込内容を編集する(token起点、公開API)。
+ * 必須パラメータ: token, name, companyName, email, phone
+ * 任意パラメータ: department, industry, interests(配列 or カンマ区切り文字列), companions
+ *
+ * ID・QRトークン・申込日時・チェックイン状態・チェックイン日時・受付場所は、リクエストに
+ * 同名のパラメータが含まれていても一切参照・上書きしない(更新対象を editable フィールドの
+ * インデックスのみへの代入に限定するホワイトリスト方式で保証している)。
+ */
+function updateVisitor_(params) {
+  var missing = requireFields_(params, ['token', 'name', 'companyName', 'email', 'phone']);
+  if (missing.length > 0) {
+    return errorResult_('validation_error', '必須項目が不足しています: ' + missing.join(', '));
+  }
+  if (!isValidEmail_(params.email)) {
+    return errorResult_('validation_error', 'メールアドレスの形式が不正です。');
+  }
+
+  var interests = Array.isArray(params.interests)
+    ? params.interests.join(', ')
+    : (params.interests || '');
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var sheet = getSheet_(SHEET_NAMES.VISITORS);
+    var rowIndex = findRowByColumnValue_(sheet, VISITOR_HEADERS, 'QRトークン', params.token);
+    if (rowIndex === -1) {
+      return errorResult_('not_found', '指定されたトークンに該当する申込情報が見つかりません。');
+    }
+
+    var colIndex = buildColumnIndexMap_(VISITOR_HEADERS);
+    var rowValues = sheet.getRange(rowIndex, 1, 1, VISITOR_HEADERS.length).getValues()[0];
+
+    rowValues[colIndex['氏名']] = params.name;
+    rowValues[colIndex['会社名']] = params.companyName;
+    rowValues[colIndex['部署役職']] = params.department || '';
+    rowValues[colIndex['メールアドレス']] = params.email;
+    rowValues[colIndex['電話番号']] = forcePlainTextPhoneValue_(params.phone);
+    rowValues[colIndex['業種']] = params.industry || '';
+    rowValues[colIndex['関心カテゴリ']] = interests;
+    rowValues[colIndex['同伴者数']] = params.companions || 0;
+
+    // 電話番号列が数値化されて先頭の0が失われないよう、appendRecord_ と同様にプレイン
+    // テキスト形式へ固定してから書き込む。
+    sheet.getRange(rowIndex, colIndex['電話番号'] + 1).setNumberFormat('@');
+    sheet.getRange(rowIndex, 1, 1, VISITOR_HEADERS.length).setValues([rowValues]);
+
+    var updatedRowValues = sheet.getRange(rowIndex, 1, 1, VISITOR_HEADERS.length).getValues()[0];
+    return successResult_({ visitor: rowValuesToObject_(VISITOR_HEADERS, updatedRowValues) });
+  } finally {
+    lock.releaseLock();
   }
 }
 
