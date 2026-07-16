@@ -145,12 +145,65 @@
           </tbody>
         </table>
       </section>
+
+      <section class="form-card">
+        <h2 class="form-section-title">自分の公開QR</h2>
+        <p class="form-hint">
+          出展者の方に読み取っていただくためのQRコードです。氏名・連絡先等の個人情報は含まれません。
+        </p>
+        <p style="text-align: center;">
+          <img id="publicScanQrImage" width="220" height="220" alt="自分の公開QR" />
+        </p>
+      </section>
+
+      <section class="form-card">
+        <h2 class="form-section-title">気になった出展者をスキャン</h2>
+        <p class="form-hint">出展ブースに掲示されたQRコードを読み取ると、「気になった出展者」として記録されます。</p>
+
+        <div id="scanResult" class="checkin-result checkin-result--idle" role="status" aria-live="polite">
+          QRコードを読み取ると、ここに結果が表示されます。
+        </div>
+
+        <h3 class="checkin-section-title">カメラでQRコードを読み取る</h3>
+        <button type="button" id="cameraToggleBtn" class="btn btn-block btn-lg">カメラを起動</button>
+        <p class="camera-status" id="cameraStatus" hidden></p>
+        <div class="qr-reader-box" id="qr-reader" hidden></div>
+
+        <div class="manual-entry-box">
+          <h3 class="checkin-section-title">手動でIDを入力する</h3>
+          <p class="form-hint">
+            カメラが使えない場合は、出展ブースに掲示された公開ブースIDを直接入力してください。
+          </p>
+          <form id="manualScanForm" novalidate>
+            <div class="form-group">
+              <label class="form-label" for="manualTargetId">公開ブースID</label>
+              <input type="text" id="manualTargetId" name="manualTargetId" autocomplete="off" placeholder="例: a1b2c3d4e5f64789..." />
+            </div>
+            <button type="submit" class="btn btn-block btn-lg" id="manualScanSubmitBtn">この内容で記録する</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="form-card">
+        <h2 class="form-section-title">気になった出展者一覧</h2>
+        <p class="form-hint" id="interestsListEmpty" hidden>まだ記録した出展者はいません。</p>
+        <div class="data-table-wrapper">
+          <table class="data-table" id="interestsTable" hidden>
+            <thead>
+              <tr><th>会社名</th><th>記録日時</th></tr>
+            </thead>
+            <tbody id="interestsTableBody"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/mailcheck@1.1.2/src/mailcheck.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script src="../../assets/js/common.js"></script>
   <script src="../../assets/js/api-client.js"></script>
+  <script src="../../assets/js/qr-scanner.js"></script>
   <script>
     (function () {
       const loadingState = document.getElementById('loadingState');
@@ -255,6 +308,11 @@
 
         document.getElementById('fieldCheckinTime').textContent = visitor['チェックイン日時'] || '(未受付)';
         document.getElementById('fieldCheckinLocation').textContent = visitor['受付場所'] || '(未受付)';
+
+        if (visitor['公開スキャンID']) {
+          document.getElementById('publicScanQrImage').src =
+            'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(visitor['公開スキャンID']);
+        }
       }
 
       function showContent(visitor) {
@@ -269,6 +327,7 @@
           const result = await callGasApiGet('getVisitorByToken', { token: token });
           if (result && result.success && result.visitor) {
             showContent(result.visitor);
+            loadInterests();
           } else if (result && result.error === 'not_found') {
             showError('該当するお申し込み情報が見つかりませんでした。URLをご確認のうえ、確認メールに記載されたリンクからアクセスしてください。');
           } else {
@@ -278,6 +337,161 @@
           showError('通信エラーが発生しました。ネットワーク環境をご確認のうえ、再度お試しください。');
         }
       }
+
+      // ---- 気になった出展者をスキャン・記録する ----
+
+      const scanResultBox = document.getElementById('scanResult');
+      const cameraToggleBtn = document.getElementById('cameraToggleBtn');
+      const cameraStatus = document.getElementById('cameraStatus');
+      const qrReaderBox = document.getElementById('qr-reader');
+      const manualScanForm = document.getElementById('manualScanForm');
+      const manualTargetIdInput = document.getElementById('manualTargetId');
+      const manualScanSubmitBtn = document.getElementById('manualScanSubmitBtn');
+      const interestsEmpty = document.getElementById('interestsListEmpty');
+      const interestsTable = document.getElementById('interestsTable');
+      const interestsTableBody = document.getElementById('interestsTableBody');
+
+      let isScanProcessing = false;
+      let lastScannedId = null;
+      let lastScanAt = 0;
+
+      function showScanResult(type, mainText, subText) {
+        scanResultBox.className = 'checkin-result checkin-result--' + type;
+        scanResultBox.innerHTML = '';
+        scanResultBox.appendChild(document.createTextNode(mainText));
+        if (subText) {
+          const sub = document.createElement('span');
+          sub.className = 'checkin-result-sub';
+          sub.textContent = subText;
+          scanResultBox.appendChild(sub);
+        }
+        scanResultBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      function renderInterests(interests) {
+        interestsTableBody.innerHTML = '';
+        if (!interests || interests.length === 0) {
+          interestsEmpty.hidden = false;
+          interestsTable.hidden = true;
+          return;
+        }
+        interestsEmpty.hidden = true;
+        interestsTable.hidden = false;
+        interests.forEach(function (item) {
+          const tr = document.createElement('tr');
+          const nameTd = document.createElement('td');
+          nameTd.textContent = item.targetName || '';
+          const timeTd = document.createElement('td');
+          timeTd.textContent = item.recordedAt || '';
+          tr.appendChild(nameTd);
+          tr.appendChild(timeTd);
+          interestsTableBody.appendChild(tr);
+        });
+      }
+
+      async function loadInterests() {
+        try {
+          const result = await callGasApiGet('getMyInterests', { scannerType: 'visitor', scannerToken: token });
+          if (result && result.success) {
+            renderInterests(result.interests);
+          }
+        } catch (err) {
+          // 一覧の再取得に失敗しても致命的ではないため、ここでは何もしない(次回操作時に再試行される)。
+        }
+      }
+
+      /**
+       * 読み取った(または手動入力された)公開ブースIDを GAS API(action=logInterest)に
+       * 送信し、結果を画面に表示する。カメラでの読み取り・手動入力の両方から呼び出される。
+       */
+      async function processScan(targetPublicId) {
+        const trimmed = (targetPublicId || '').trim();
+        if (trimmed === '') {
+          showScanResult('error', '公開ブースIDを入力してください。');
+          return;
+        }
+
+        showScanResult('idle', '記録処理中です...');
+
+        try {
+          const result = await callGasApi('logInterest', {
+            scannerType: 'visitor',
+            scannerToken: token,
+            targetPublicId: trimmed
+          });
+
+          if (result && result.success) {
+            showScanResult('success', (result.targetName || '') + ' を記録しました');
+            manualScanForm.reset();
+            loadInterests();
+          } else if (result && result.error === 'not_found') {
+            showScanResult('error', '該当する出展ブースが見つかりませんでした', 'QRコードやIDをご確認のうえ、再度お試しください。');
+          } else {
+            showScanResult('error', '記録に失敗しました', (result && result.message) || '時間をおいて再度お試しください。');
+          }
+        } catch (err) {
+          showScanResult('error', '通信エラーが発生しました', 'ネットワーク環境をご確認のうえ、再度お試しください。');
+        }
+      }
+
+      async function handleScanDecoded(decodedText) {
+        const now = Date.now();
+        if (isScanProcessing) return;
+        // 同じQRコードがカメラに写り続けている間、連続で何度も送信しないようにする。
+        if (decodedText === lastScannedId && now - lastScanAt < 4000) return;
+
+        lastScannedId = decodedText;
+        lastScanAt = now;
+        isScanProcessing = true;
+        await processScan(decodedText);
+        isScanProcessing = false;
+      }
+
+      cameraToggleBtn.addEventListener('click', async function () {
+        if (QrScanner.isScanning()) {
+          await QrScanner.stop();
+          qrReaderBox.hidden = true;
+          cameraStatus.hidden = true;
+          cameraToggleBtn.textContent = 'カメラを起動';
+          return;
+        }
+
+        if (!QrScanner.isSupported()) {
+          cameraStatus.hidden = false;
+          cameraStatus.textContent = 'このブラウザ・端末ではカメラを利用できません。下の手動入力欄をご利用ください。';
+          return;
+        }
+
+        cameraToggleBtn.disabled = true;
+        qrReaderBox.hidden = false;
+        cameraStatus.hidden = false;
+        cameraStatus.textContent = 'カメラを起動しています...';
+
+        try {
+          await QrScanner.start('qr-reader', handleScanDecoded);
+          cameraToggleBtn.textContent = 'カメラを停止';
+          cameraStatus.textContent = '出展ブースのQRコードを枠内に写してください。';
+        } catch (err) {
+          qrReaderBox.hidden = true;
+          cameraStatus.textContent =
+            'カメラを起動できませんでした。カメラへのアクセス許可をご確認いただくか、下の手動入力欄をご利用ください。';
+        } finally {
+          cameraToggleBtn.disabled = false;
+        }
+      });
+
+      manualScanForm.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        CommonUtils.setLoading(manualScanSubmitBtn, true, '記録処理中...', 'この内容で記録する');
+        await processScan(manualTargetIdInput.value);
+        CommonUtils.setLoading(manualScanSubmitBtn, false, '記録処理中...', 'この内容で記録する');
+      });
+
+      window.addEventListener('beforeunload', function () {
+        if (QrScanner.isScanning()) {
+          QrScanner.stop();
+        }
+      });
 
       form.addEventListener('submit', async function (event) {
         event.preventDefault();
