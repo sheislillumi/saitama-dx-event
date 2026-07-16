@@ -16,6 +16,9 @@ saitama-dx-event/
 │   └── index.html               # QRコード受付画面(当日運営者用)
 ├── admin/
 │   └── index.html               # 管理ダッシュボード(要パスワード)
+├── mypage/
+│   └── visitor/
+│       └── index.html           # 来場者向けマイページ(申込内容・QRコード再表示・チェックイン状況確認)
 ├── assets/
 │   ├── css/style.css            # 全画面共通スタイル
 │   └── js/
@@ -148,19 +151,23 @@ curl -X POST "https://script.google.com/macros/s/xxxxxxxxxxxx/exec" `
 | action | 必須パラメータ | 概要 |
 |---|---|---|
 | `registerExhibitor` | companyName, contactName, email, phone, category | 出展申込をExhibitorsシートに追加。続けてGmailAppで「申請受付」の確認メール(QRコードなし。選定は委託者が行う旨を明記)を送信する。送信に失敗しても出展申込登録自体は失敗させず、ErrorLogシートにエラーを記録する |
-| `registerVisitor` | name, companyName, email, phone, agreement(true) | UUID・QRトークンを発行しVisitorsシートに追加。続けてQRコード画像を生成(api.qrserver.com)し、GmailAppで確認メール(QRコードをインライン画像として埋め込み)を送信する。QRコード生成・メール送信に失敗しても来場者登録自体は失敗させず、ErrorLogシートにエラーを記録する |
+| `registerVisitor` | name, companyName, email, phone, agreement(true) | UUID・QRトークンを発行しVisitorsシートに追加。続けてQRコード画像を生成(api.qrserver.com)し、GmailAppで確認メール(QRコードをインライン画像として埋め込み、マイページ(`mypage/visitor/`)へのリンクも記載)を送信する。QRコード生成・メール送信に失敗しても来場者登録自体は失敗させず、ErrorLogシートにエラーを記録する |
 | `checkin` | qrToken | 該当来場者のチェックイン状態を更新。重複時は「受付済みです」を返す |
 
-### doGet(e) — action で分岐(すべて `apiKey` 必須)
+### doGet(e) — action で分岐
 
-| action | 概要 |
-|---|---|
-| `getVisitors` | 来場者一覧を取得(管理画面用) |
-| `getExhibitors` | 出展者一覧を取得(管理画面用) |
-| `getStats` | 申込者数・チェックイン率などの集計を取得 |
+| action | 必須パラメータ | 概要 |
+|---|---|---|
+| `getVisitors` | apiKey | 来場者一覧を取得(管理画面用) |
+| `getExhibitors` | apiKey | 出展者一覧を取得(管理画面用) |
+| `getStats` | apiKey | 申込者数・チェックイン率などの集計を取得 |
+| `getVisitorByToken` | token | QRトークンが一致する来場者1件のみを取得(来場者向けマイページ用)。一覧取得は不可 |
 
-`apiKey` はスクリプトプロパティ `ADMIN_API_KEY` の値と一致しないと `401相当`
-(`{"success":false,"error":"unauthorized"}`)が返ります。
+`getVisitors`/`getExhibitors`/`getStats` は、`apiKey` がスクリプトプロパティ `ADMIN_API_KEY`
+の値と一致しないと `401相当`(`{"success":false,"error":"unauthorized"}`)が返ります。
+`getVisitorByToken` は個人情報を含む公開APIのため `apiKey` 認証は課しませんが、代わりに
+`token`(推測困難なランダム文字列)と完全一致する行が1件見つかった場合のみその1件を返す
+設計とし、一覧・検索の類は一切提供していません。
 
 ## CORSに関する注意
 

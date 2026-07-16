@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>マイページ | 県内企業DX推進統合イベント</title>
+  <link rel="stylesheet" href="../../assets/css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="back-link" href="../../index.html">← イベントHPに戻る</a>
+  </header>
+
+  <main class="page-container">
+    <h1 class="page-title">マイページ</h1>
+    <p class="page-lead">
+      ご来場のお申し込み内容と、受付用QRコード・チェックイン状況をご確認いただけます。
+    </p>
+
+    <div id="loadingState" class="form-message" role="status">読み込み中です...</div>
+    <div id="errorState" class="form-message form-message--error" role="alert" hidden></div>
+
+    <div id="contentState" hidden>
+      <section class="form-card">
+        <h2 class="form-section-title">お申し込み内容</h2>
+        <table class="info-table">
+          <tbody>
+            <tr><th>氏名</th><td id="fieldName"></td></tr>
+            <tr><th>会社名</th><td id="fieldCompanyName"></td></tr>
+            <tr><th>部署・役職</th><td id="fieldDepartment"></td></tr>
+            <tr><th>メールアドレス</th><td id="fieldEmail"></td></tr>
+            <tr><th>電話番号</th><td id="fieldPhone"></td></tr>
+            <tr><th>業種</th><td id="fieldIndustry"></td></tr>
+            <tr><th>関心カテゴリ</th><td id="fieldInterests"></td></tr>
+            <tr><th>同伴者数</th><td id="fieldCompanions"></td></tr>
+            <tr><th>申込日時</th><td id="fieldAppliedAt"></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="form-card">
+        <h2 class="form-section-title">受付用QRコード</h2>
+        <p class="form-hint">当日は、このQRコードを受付にてご提示ください。</p>
+        <p style="text-align: center;">
+          <img id="qrCodeImage" width="220" height="220" alt="受付用QRコード" />
+        </p>
+      </section>
+
+      <section class="form-card">
+        <h2 class="form-section-title">チェックイン状況</h2>
+        <table class="info-table">
+          <tbody>
+            <tr>
+              <th>状態</th>
+              <td><span id="checkinStatusBadge" class="status-badge"></span></td>
+            </tr>
+            <tr><th>チェックイン日時</th><td id="fieldCheckinTime"></td></tr>
+            <tr><th>受付場所</th><td id="fieldCheckinLocation"></td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+
+  <script src="../../assets/js/common.js"></script>
+  <script src="../../assets/js/api-client.js"></script>
+  <script>
+    (function () {
+      const loadingState = document.getElementById('loadingState');
+      const errorState = document.getElementById('errorState');
+      const contentState = document.getElementById('contentState');
+
+      function showError(message) {
+        loadingState.hidden = true;
+        contentState.hidden = true;
+        errorState.hidden = false;
+        errorState.textContent = message;
+      }
+
+      function showContent(visitor, token) {
+        loadingState.hidden = true;
+        errorState.hidden = true;
+        contentState.hidden = false;
+
+        document.getElementById('fieldName').textContent = visitor['氏名'] || '';
+        document.getElementById('fieldCompanyName').textContent = visitor['会社名'] || '';
+        document.getElementById('fieldDepartment').textContent = visitor['部署役職'] || '(未入力)';
+        document.getElementById('fieldEmail').textContent = visitor['メールアドレス'] || '';
+        document.getElementById('fieldPhone').textContent = visitor['電話番号'] || '';
+        document.getElementById('fieldIndustry').textContent = visitor['業種'] || '(未入力)';
+        document.getElementById('fieldInterests').textContent = visitor['関心カテゴリ'] || '(未選択)';
+        document.getElementById('fieldCompanions').textContent = (visitor['同伴者数'] || 0) + ' 名';
+        document.getElementById('fieldAppliedAt').textContent = visitor['申込日時'] || '';
+
+        document.getElementById('qrCodeImage').src =
+          'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(token);
+
+        const isCheckedIn = visitor['チェックイン状態'] === '済';
+        const badge = document.getElementById('checkinStatusBadge');
+        badge.textContent = isCheckedIn ? 'チェックイン済' : '未チェックイン';
+        badge.className = 'status-badge ' + (isCheckedIn ? 'status-badge--approved' : 'status-badge--pending');
+
+        document.getElementById('fieldCheckinTime').textContent = visitor['チェックイン日時'] || '(未受付)';
+        document.getElementById('fieldCheckinLocation').textContent = visitor['受付場所'] || '(未受付)';
+      }
+
+      async function init() {
+        const token = new URLSearchParams(window.location.search).get('token');
+
+        if (!token) {
+          showError('URLが正しくありません。確認メールに記載されたリンクからアクセスしてください。');
+          return;
+        }
+
+        try {
+          const result = await callGasApiGet('getVisitorByToken', { token: token });
+          if (result && result.success && result.visitor) {
+            showContent(result.visitor, token);
+          } else if (result && result.error === 'not_found') {
+            showError('該当するお申し込み情報が見つかりませんでした。URLをご確認のうえ、確認メールに記載されたリンクからアクセスしてください。');
+          } else {
+            showError((result && result.message) || '情報の取得に失敗しました。時間をおいて再度お試しください。');
+          }
+        } catch (err) {
+          showError('通信エラーが発生しました。ネットワーク環境をご確認のうえ、再度お試しください。');
+        }
+      }
+
+      init();
+    })();
+  </script>
+</body>
+</html>

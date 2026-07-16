@@ -121,6 +121,10 @@ var VISITOR_CHECKIN_STATUS_DONE = '済';
 // QRコード生成サービス(APIキー不要、Google Chart APIは廃止済みのため使用しない)
 var QR_CODE_API_URL = 'https://api.qrserver.com/v1/create-qr-code/';
 
+// 来場者向けマイページ(mypage/visitor/index.html)のベースURL。
+// 確認メールには、末尾に QRトークンを ?token=xxx として付与したURLを記載する。
+var VISITOR_MYPAGE_BASE_URL = 'https://sheislillumi.github.io/saitama-dx-event/mypage/visitor/';
+
 // 確認メールに記載するイベント基本情報
 var EVENT_INFO = {
   NAME: '県内企業DX推進統合イベント',
@@ -135,10 +139,11 @@ var EVENT_INFO = {
 
 /**
  * GET リクエストの窓口。action パラメータで分岐する。
- * 対応 action: getVisitors, getExhibitors, getStats (いずれも要APIキー)
+ * 対応 action: getVisitors, getExhibitors, getStats (いずれも要APIキー)、
+ *             getVisitorByToken (来場者本人向けマイページ用、APIキー不要)
  */
 function doGet(e) {
-  return handleRequest_(e, ['getVisitors', 'getExhibitors', 'getStats']);
+  return handleRequest_(e, ['getVisitors', 'getExhibitors', 'getStats', 'getVisitorByToken']);
 }
 
 /**
@@ -179,6 +184,8 @@ function handleRequest_(e, allowedActions) {
         return jsonResponse_(withAdminAuth_(params, getExhibitors_));
       case 'getStats':
         return jsonResponse_(withAdminAuth_(params, getStats_));
+      case 'getVisitorByToken':
+        return jsonResponse_(getVisitorByToken_(params));
       default:
         return jsonResponse_(errorResult_('unknown_action', '不明な action です: ' + action));
     }
@@ -412,8 +419,8 @@ function sendVisitorConfirmationEmail_(visitorId, qrToken, name, email) {
 
   try {
     var subject = '【' + EVENT_INFO.NAME + '】お申し込みを受け付けました';
-    GmailApp.sendEmail(email, subject, buildVisitorConfirmationEmailPlainText_(name), {
-      htmlBody: buildVisitorConfirmationEmailHtml_(name),
+    GmailApp.sendEmail(email, subject, buildVisitorConfirmationEmailPlainText_(name, qrToken), {
+      htmlBody: buildVisitorConfirmationEmailHtml_(name, qrToken),
       inlineImages: { qrCodeImage: qrBlob },
       name: EVENT_INFO.NAME + ' 事務局'
     });
@@ -451,7 +458,8 @@ function fetchQrCodeImage_(qrToken, visitorId, email) {
 }
 
 /** 確認メールのHTML本文を組み立てる。QRコード画像は inlineImages の cid 参照で埋め込む。 */
-function buildVisitorConfirmationEmailHtml_(name) {
+function buildVisitorConfirmationEmailHtml_(name, qrToken) {
+  var mypageUrl = VISITOR_MYPAGE_BASE_URL + '?token=' + encodeURIComponent(qrToken);
   return (
     '<div style="font-family: sans-serif; line-height: 1.7; color: #1f2933;">' +
     '<p>' + escapeHtml_(name) + ' 様</p>' +
@@ -464,13 +472,17 @@ function buildVisitorConfirmationEmailHtml_(name) {
     '<p><strong>当日は、以下のQRコードを受付にてご提示ください。</strong></p>' +
     '<p><img src="cid:qrCodeImage" alt="受付用QRコード" width="220" height="220" /></p>' +
     '<p>QRコードが表示されない場合は、受付スタッフに本メールの件名またはお名前をお伝えください。</p>' +
+    '<p>お申し込み内容の確認や、QRコードの再表示は、以下のマイページからいつでも行えます。<br />' +
+    '<a href="' + mypageUrl + '">' + mypageUrl + '</a></p>' +
+    '<p style="color: #b3261e;"><strong>※ このリンクは第三者に転送しないでください。</strong></p>' +
     '<p>当日のご来場を心よりお待ちしております。</p>' +
     '</div>'
   );
 }
 
 /** 確認メールのプレーンテキスト本文(HTMLメール非対応の環境向け)を組み立てる。 */
-function buildVisitorConfirmationEmailPlainText_(name) {
+function buildVisitorConfirmationEmailPlainText_(name, qrToken) {
+  var mypageUrl = VISITOR_MYPAGE_BASE_URL + '?token=' + encodeURIComponent(qrToken);
   return [
     name + ' 様',
     '',
@@ -480,6 +492,10 @@ function buildVisitorConfirmationEmailPlainText_(name) {
     '',
     '当日は受付用QRコードをご提示ください。',
     '(このメールがHTML形式で表示されない場合は、受付スタッフにお名前をお伝えください)',
+    '',
+    'お申し込み内容の確認・QRコードの再表示は、以下のマイページから行えます。',
+    mypageUrl,
+    '※ このリンクは第三者に転送しないでください。',
     '',
     '当日のご来場を心よりお待ちしております。'
   ].join('\n');
@@ -596,6 +612,30 @@ function withAdminAuth_(params, handlerFn) {
 function getVisitors_() {
   var sheet = getSheet_(SHEET_NAMES.VISITORS);
   return successResult_({ visitors: sheetToObjects_(sheet, VISITOR_HEADERS) });
+}
+
+/**
+ * QRトークンから来場者本人の申込内容を1件だけ取得する(来場者向けマイページ用)。
+ * 個人情報を含む公開APIだが、getVisitors_ のような一覧取得ではなく、
+ * 「渡された token と完全一致する行が1件見つかった場合のみ、その1件だけ」を返す設計と
+ * することで、token(推測困難なランダム文字列)を知らない第三者が他人の情報を
+ * 取得できないようにしている(そのため apiKey によるAPIキー認証は課さない)。
+ * 必須パラメータ: token
+ */
+function getVisitorByToken_(params) {
+  var missing = requireFields_(params, ['token']);
+  if (missing.length > 0) {
+    return errorResult_('validation_error', '必須項目が不足しています: ' + missing.join(', '));
+  }
+
+  var sheet = getSheet_(SHEET_NAMES.VISITORS);
+  var rowIndex = findRowByColumnValue_(sheet, VISITOR_HEADERS, 'QRトークン', params.token);
+  if (rowIndex === -1) {
+    return errorResult_('not_found', '指定されたトークンに該当する申込情報が見つかりません。');
+  }
+
+  var rowValues = sheet.getRange(rowIndex, 1, 1, VISITOR_HEADERS.length).getValues()[0];
+  return successResult_({ visitor: rowValuesToObject_(VISITOR_HEADERS, rowValues) });
 }
 
 /** 出展者一覧を取得する(管理画面用)。 */
@@ -817,14 +857,19 @@ function sheetToObjects_(sheet, headers) {
   var results = [];
   values.forEach(function (row) {
     if (row[0] === '' || row[0] === null) return; // ID空行はスキップ
-    var obj = {};
-    headers.forEach(function (header, index) {
-      var value = row[index];
-      obj[header] = (value instanceof Date) ? Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') : value;
-    });
-    results.push(obj);
+    results.push(rowValuesToObject_(headers, row));
   });
   return results;
+}
+
+/** headers の並び順に従って、1行分の値配列を { 見出し名: 値 } のオブジェクトに変換する。 */
+function rowValuesToObject_(headers, rowValues) {
+  var obj = {};
+  headers.forEach(function (header, index) {
+    var value = rowValues[index];
+    obj[header] = (value instanceof Date) ? Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') : value;
+  });
+  return obj;
 }
 
 /**
