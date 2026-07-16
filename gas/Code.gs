@@ -18,9 +18,10 @@
  *    [実行] ボタンを押す(初回は権限の承認が必要)。
  *    → 以下の3シートが自動作成され、見出し行が設定される。
  *
- *   ■ シート「Exhibitors」(出展者) の列見出し(A列〜L列)
+ *   ■ シート「Exhibitors」(出展者) の列見出し(A列〜M列)
  *     ID | 申込日時 | 会社名 | 担当者名 | メールアドレス | 電話番号 |
- *     希望カテゴリ | 展示内容概要 | 電源要否 | 搬入出希望時間 | ステータス | 備考
+ *     希望カテゴリ | 展示内容概要 | 電源要否 | 搬入出希望時間 | ステータス | 備考 |
+ *     アクセストークン(出展者向けマイページ mypage/exhibitor/ のログインに使うトークン)
  *
  *   ■ シート「Visitors」(来場者) の列見出し(A列〜N列)
  *     ID | QRトークン | 申込日時 | 氏名 | 会社名 | 部署役職 | メールアドレス |
@@ -98,9 +99,11 @@ var SHEET_NAMES = {
 };
 
 // スプレッドシートの列見出し(「4. データスキーマ」に準拠、この並び順でシートに書き込む)
+// アクセストークンは末尾に追加している(既存の本番シートで列を途中に挿入すると
+// 既存データの列がずれてしまうため、後方互換のため必ず末尾に追加すること)。
 var EXHIBITOR_HEADERS = [
   'ID', '申込日時', '会社名', '担当者名', 'メールアドレス', '電話番号',
-  '希望カテゴリ', '展示内容概要', '電源要否', '搬入出希望時間', 'ステータス', '備考'
+  '希望カテゴリ', '展示内容概要', '電源要否', '搬入出希望時間', 'ステータス', '備考', 'アクセストークン'
 ];
 
 var VISITOR_HEADERS = [
@@ -125,6 +128,10 @@ var QR_CODE_API_URL = 'https://api.qrserver.com/v1/create-qr-code/';
 // 確認メールには、末尾に QRトークンを ?token=xxx として付与したURLを記載する。
 var VISITOR_MYPAGE_BASE_URL = 'https://sheislillumi.github.io/saitama-dx-event/mypage/visitor/';
 
+// 出展者向けマイページ(mypage/exhibitor/index.html)のベースURL。
+// 確認メールには、末尾に アクセストークンを ?token=xxx として付与したURLを記載する。
+var EXHIBITOR_MYPAGE_BASE_URL = 'https://sheislillumi.github.io/saitama-dx-event/mypage/exhibitor/';
+
 // 確認メールに記載するイベント基本情報
 var EVENT_INFO = {
   NAME: '県内企業DX推進統合イベント',
@@ -140,18 +147,18 @@ var EVENT_INFO = {
 /**
  * GET リクエストの窓口。action パラメータで分岐する。
  * 対応 action: getVisitors, getExhibitors, getStats (いずれも要APIキー)、
- *             getVisitorByToken (来場者本人向けマイページ用、APIキー不要)
+ *             getVisitorByToken, getExhibitorByToken (それぞれ本人向けマイページ用、APIキー不要)
  */
 function doGet(e) {
-  return handleRequest_(e, ['getVisitors', 'getExhibitors', 'getStats', 'getVisitorByToken']);
+  return handleRequest_(e, ['getVisitors', 'getExhibitors', 'getStats', 'getVisitorByToken', 'getExhibitorByToken']);
 }
 
 /**
  * POST リクエストの窓口。action パラメータで分岐する。
- * 対応 action: registerExhibitor, registerVisitor, checkin, updateVisitor
+ * 対応 action: registerExhibitor, registerVisitor, checkin, updateVisitor, updateExhibitor
  */
 function doPost(e) {
-  return handleRequest_(e, ['registerExhibitor', 'registerVisitor', 'checkin', 'updateVisitor']);
+  return handleRequest_(e, ['registerExhibitor', 'registerVisitor', 'checkin', 'updateVisitor', 'updateExhibitor']);
 }
 
 /**
@@ -180,6 +187,8 @@ function handleRequest_(e, allowedActions) {
         return jsonResponse_(checkin_(params));
       case 'updateVisitor':
         return jsonResponse_(updateVisitor_(params));
+      case 'updateExhibitor':
+        return jsonResponse_(updateExhibitor_(params));
       case 'getVisitors':
         return jsonResponse_(withAdminAuth_(params, getVisitors_));
       case 'getExhibitors':
@@ -188,6 +197,8 @@ function handleRequest_(e, allowedActions) {
         return jsonResponse_(withAdminAuth_(params, getStats_));
       case 'getVisitorByToken':
         return jsonResponse_(getVisitorByToken_(params));
+      case 'getExhibitorByToken':
+        return jsonResponse_(getExhibitorByToken_(params));
       default:
         return jsonResponse_(errorResult_('unknown_action', '不明な action です: ' + action));
     }
@@ -223,6 +234,7 @@ function registerExhibitor_(params) {
   try {
     var sheet = getSheet_(SHEET_NAMES.EXHIBITORS);
     var id = generateId_();
+    var accessToken = generateAccessToken_();
     var record = {
       'ID': id,
       '申込日時': nowString_(),
@@ -235,7 +247,8 @@ function registerExhibitor_(params) {
       '電源要否': params.powerNeeded || '',
       '搬入出希望時間': params.loadingTime || '',
       'ステータス': EXHIBITOR_STATUS_DEFAULT,
-      '備考': params.notes || ''
+      '備考': params.notes || '',
+      'アクセストークン': accessToken
     };
     appendRecord_(sheet, EXHIBITOR_HEADERS, record);
 
@@ -243,12 +256,12 @@ function registerExhibitor_(params) {
     // (sendExhibitorConfirmationEmail_ 内部で例外を握りつぶし ErrorLog シートに記録する
     // 設計だが、念のためここでも try/catch する。sendVisitorConfirmationEmail_ と同じ方針)。
     try {
-      sendExhibitorConfirmationEmail_(id, params.contactName, params.email, params.companyName, params.category);
+      sendExhibitorConfirmationEmail_(id, params.contactName, params.email, params.companyName, params.category, accessToken);
     } catch (err) {
       logError_('出展申請確認メール送信', id, '', params.email, err && err.message ? err.message : String(err));
     }
 
-    return successResult_({ id: id });
+    return successResult_({ id: id, accessToken: accessToken });
   } finally {
     lock.releaseLock();
   }
@@ -265,11 +278,11 @@ function registerExhibitor_(params) {
  * まだ選定前のためQRコードは付与しない。送信に失敗しても例外を投げず、ErrorLogシートに
  * 記録するのみに留める(呼び出し元の出展申込登録処理を失敗させないための設計)。
  */
-function sendExhibitorConfirmationEmail_(exhibitorId, contactName, email, companyName, category) {
+function sendExhibitorConfirmationEmail_(exhibitorId, contactName, email, companyName, category, accessToken) {
   try {
     var subject = '【' + EVENT_INFO.NAME + '】出展申請を受け付けました';
-    GmailApp.sendEmail(email, subject, buildExhibitorConfirmationEmailPlainText_(contactName, companyName, category), {
-      htmlBody: buildExhibitorConfirmationEmailHtml_(contactName, companyName, category),
+    GmailApp.sendEmail(email, subject, buildExhibitorConfirmationEmailPlainText_(contactName, companyName, category, accessToken), {
+      htmlBody: buildExhibitorConfirmationEmailHtml_(contactName, companyName, category, accessToken),
       name: EVENT_INFO.NAME + ' 事務局'
     });
   } catch (err) {
@@ -283,7 +296,8 @@ function sendExhibitorConfirmationEmail_(exhibitorId, contactName, email, compan
  * 出展申請確認メールのHTML本文を組み立てる。
  * 「申請受付」であり選定確定ではないことを明記し、選定は委託者が行う旨を記載する。
  */
-function buildExhibitorConfirmationEmailHtml_(contactName, companyName, category) {
+function buildExhibitorConfirmationEmailHtml_(contactName, companyName, category, accessToken) {
+  var mypageUrl = EXHIBITOR_MYPAGE_BASE_URL + '?token=' + encodeURIComponent(accessToken);
   return (
     '<div style="font-family: sans-serif; line-height: 1.7; color: #1f2933;">' +
     '<p>' + escapeHtml_(companyName) + ' ' + escapeHtml_(contactName) + ' 様</p>' +
@@ -299,13 +313,17 @@ function buildExhibitorConfirmationEmailHtml_(contactName, companyName, category
     '<p><strong>本メールは出展申請の受付のご連絡であり、出展の可否が確定したものではありません。</strong><br />' +
     '出展者の選定は委託者(公益財団法人埼玉県産業振興公社)が行い、選定結果は後日改めてご連絡いたします。' +
     'あらかじめご了承ください。</p>' +
+    '<p>お申し込み内容の確認・変更や、選考ステータスの確認は、以下のマイページからいつでも行えます。<br />' +
+    '<a href="' + mypageUrl + '">' + mypageUrl + '</a></p>' +
+    '<p style="color: #b3261e;"><strong>※ このリンクは第三者に転送しないでください。</strong></p>' +
     '<p>ご不明な点がございましたら、本メールへ返信のうえお問い合わせください。</p>' +
     '</div>'
   );
 }
 
 /** 出展申請確認メールのプレーンテキスト本文(HTMLメール非対応の環境向け)を組み立てる。 */
-function buildExhibitorConfirmationEmailPlainText_(contactName, companyName, category) {
+function buildExhibitorConfirmationEmailPlainText_(contactName, companyName, category, accessToken) {
+  var mypageUrl = EXHIBITOR_MYPAGE_BASE_URL + '?token=' + encodeURIComponent(accessToken);
   return [
     companyName + ' ' + contactName + ' 様',
     '',
@@ -322,7 +340,11 @@ function buildExhibitorConfirmationEmailPlainText_(contactName, companyName, cat
     '',
     '本メールは出展申請の受付のご連絡であり、出展の可否が確定したものではありません。',
     '出展者の選定は委託者(公益財団法人埼玉県産業振興公社)が行い、',
-    '選定結果は後日改めてご連絡いたします。あらかじめご了承ください。'
+    '選定結果は後日改めてご連絡いたします。あらかじめご了承ください。',
+    '',
+    'お申し込み内容の確認・変更・選考ステータスの確認は、以下のマイページから行えます。',
+    mypageUrl,
+    '※ このリンクは第三者に転送しないでください。'
   ].join('\n');
 }
 
@@ -595,6 +617,63 @@ function updateVisitor_(params) {
 
 
 // ==========================================================================
+// action ハンドラ: 出展者マイページ編集
+// ==========================================================================
+
+/**
+ * 出展者本人がマイページ(mypage/exhibitor/)から申込内容を編集する(token起点、公開API)。
+ * 必須パラメータ: token, companyName, contactName, email, phone, category
+ * 任意パラメータ: description, powerNeeded, loadingTime, notes
+ *
+ * ID・申込日時・ステータス(選定結果)・アクセストークンは、リクエストに同名の
+ * パラメータが含まれていても一切参照・上書きしない(updateVisitor_ と同じホワイトリスト
+ * 方式)。ステータスは委託者側の選定結果であり、出展者本人が書き換えられてはならない。
+ */
+function updateExhibitor_(params) {
+  var missing = requireFields_(params, ['token', 'companyName', 'contactName', 'email', 'phone', 'category']);
+  if (missing.length > 0) {
+    return errorResult_('validation_error', '必須項目が不足しています: ' + missing.join(', '));
+  }
+  if (!isValidEmail_(params.email)) {
+    return errorResult_('validation_error', 'メールアドレスの形式が不正です。');
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var sheet = getSheet_(SHEET_NAMES.EXHIBITORS);
+    var rowIndex = findRowByColumnValue_(sheet, EXHIBITOR_HEADERS, 'アクセストークン', params.token);
+    if (rowIndex === -1) {
+      return errorResult_('not_found', '指定されたトークンに該当する申込情報が見つかりません。');
+    }
+
+    var colIndex = buildColumnIndexMap_(EXHIBITOR_HEADERS);
+    var rowValues = sheet.getRange(rowIndex, 1, 1, EXHIBITOR_HEADERS.length).getValues()[0];
+
+    rowValues[colIndex['会社名']] = params.companyName;
+    rowValues[colIndex['担当者名']] = params.contactName;
+    rowValues[colIndex['メールアドレス']] = params.email;
+    rowValues[colIndex['電話番号']] = forcePlainTextPhoneValue_(params.phone);
+    rowValues[colIndex['希望カテゴリ']] = params.category;
+    rowValues[colIndex['展示内容概要']] = params.description || '';
+    rowValues[colIndex['電源要否']] = params.powerNeeded || '';
+    rowValues[colIndex['搬入出希望時間']] = params.loadingTime || '';
+    rowValues[colIndex['備考']] = params.notes || '';
+
+    // 電話番号列が数値化されて先頭の0が失われないよう、appendRecord_ と同様にプレイン
+    // テキスト形式へ固定してから書き込む。
+    sheet.getRange(rowIndex, colIndex['電話番号'] + 1).setNumberFormat('@');
+    sheet.getRange(rowIndex, 1, 1, EXHIBITOR_HEADERS.length).setValues([rowValues]);
+
+    var updatedRowValues = sheet.getRange(rowIndex, 1, 1, EXHIBITOR_HEADERS.length).getValues()[0];
+    return successResult_({ exhibitor: rowValuesToObject_(EXHIBITOR_HEADERS, updatedRowValues) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+// ==========================================================================
 // action ハンドラ: QRコード受付(チェックイン)
 // ==========================================================================
 
@@ -704,6 +783,30 @@ function getVisitorByToken_(params) {
 function getExhibitors_() {
   var sheet = getSheet_(SHEET_NAMES.EXHIBITORS);
   return successResult_({ exhibitors: sheetToObjects_(sheet, EXHIBITOR_HEADERS) });
+}
+
+/**
+ * アクセストークンから出展者本人の申込内容を1件だけ取得する(出展者向けマイページ用)。
+ * getVisitorByToken_ と同じ設計方針: 個人情報を含む公開APIだが、一覧取得(getExhibitors_)
+ * とは異なり「渡された token と完全一致する行が1件見つかった場合のみ、その1件だけ」を
+ * 返すことで、token を知らない第三者が他社の情報を取得できないようにしている
+ * (そのため apiKey によるAPIキー認証は課さない)。
+ * 必須パラメータ: token
+ */
+function getExhibitorByToken_(params) {
+  var missing = requireFields_(params, ['token']);
+  if (missing.length > 0) {
+    return errorResult_('validation_error', '必須項目が不足しています: ' + missing.join(', '));
+  }
+
+  var sheet = getSheet_(SHEET_NAMES.EXHIBITORS);
+  var rowIndex = findRowByColumnValue_(sheet, EXHIBITOR_HEADERS, 'アクセストークン', params.token);
+  if (rowIndex === -1) {
+    return errorResult_('not_found', '指定されたトークンに該当する申込情報が見つかりません。');
+  }
+
+  var rowValues = sheet.getRange(rowIndex, 1, 1, EXHIBITOR_HEADERS.length).getValues()[0];
+  return successResult_({ exhibitor: rowValuesToObject_(EXHIBITOR_HEADERS, rowValues) });
 }
 
 /** 集計データを取得する(申込者数・チェックイン率など)。 */
@@ -821,6 +924,44 @@ function fixPhoneNumberFormatForSheet_(sheet, headers) {
     return [forcePlainTextPhoneValue_(value)];
   });
   range.setValues(fixedValues);
+}
+
+/**
+ * 【一時的な修正関数】既にアクセストークンなしで登録されている出展者行に、
+ * 後からアクセストークンを発行して書き込む。
+ *
+ * アクセストークン列(マイページ mypage/exhibitor/ のログインに使う)を追加する前に
+ * 登録された出展申込みは、この列が空のままになっている。この関数は Exhibitors シートを
+ * 走査し、アクセストークン列が空の行にのみ新規トークンを発行して書き込む
+ * (既にトークンが入っている行は上書きしない)。
+ *
+ * 【使い方】Apps Script エディタの関数選択ドロップダウンで
+ * `backfillExhibitorTokens_` を選び、[実行] ボタンを押して手動で1回だけ実行する。
+ * fixPhoneNumberFormat_ と同様、既存データ移行のための一度きりの実行を想定した関数。
+ */
+function backfillExhibitorTokens_() {
+  var sheet = getSheet_(SHEET_NAMES.EXHIBITORS);
+  var tokenColIndex = buildColumnIndexMap_(EXHIBITOR_HEADERS)['アクセストークン'];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log('Exhibitorsシートにデータ行がありません。');
+    return;
+  }
+
+  var range = sheet.getRange(2, 1, lastRow - 1, EXHIBITOR_HEADERS.length);
+  var values = range.getValues();
+  var updatedCount = 0;
+
+  values.forEach(function (row) {
+    if (row[0] === '' || row[0] === null) return; // ID空行はスキップ
+    if (row[tokenColIndex] === '' || row[tokenColIndex] === null) {
+      row[tokenColIndex] = generateAccessToken_();
+      updatedCount++;
+    }
+  });
+
+  range.setValues(values);
+  Logger.log('アクセストークンのバックフィルが完了しました。発行件数: ' + updatedCount + ' 件。');
 }
 
 
@@ -958,10 +1099,24 @@ function generateId_() {
 }
 
 /**
- * QRトークンを発行する。個人情報を含まないランダム文字列(32桁の16進数)。
+ * ランダムなトークン文字列を発行する(Utilities.getUuid()ベース、ハイフンなし32桁の16進数)。
+ * QRトークン(来場者)・アクセストークン(出展者)は、いずれもこの共通実装を使う。
  */
-function generateQrToken_() {
+function generateRandomToken_() {
   return Utilities.getUuid().replace(/-/g, '');
+}
+
+/** QRトークンを発行する。個人情報を含まないランダム文字列(32桁の16進数)。 */
+function generateQrToken_() {
+  return generateRandomToken_();
+}
+
+/**
+ * 出展者向けマイページ(mypage/exhibitor/)用のアクセストークンを発行する。
+ * 個人情報を含まないランダム文字列(32桁の16進数)。
+ */
+function generateAccessToken_() {
+  return generateRandomToken_();
 }
 
 function nowString_() {
